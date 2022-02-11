@@ -1,8 +1,5 @@
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Diagnostics;
-using System.ComponentModel;
-using System.Net.WebSockets;
 
 namespace Epoxide;
 
@@ -316,9 +313,6 @@ public sealed class Binding : IBinding
     }
 }
 
-/// <summary>
-/// Multiple bindings grouped under a single binding to make adding and removing easier.
-/// </summary>
 public sealed class CompositeBinding : IBinding
 {
     readonly List<IBinding> bindings;

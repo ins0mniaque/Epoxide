@@ -48,7 +48,7 @@ namespace Epoxide.ExpressionUtil
     // BinaryExpression fingerprint class
     // Useful for things like array[index]
 
-    internal sealed class BinaryExpressionFingerprint : ExpressionFingerprint
+    public sealed class BinaryExpressionFingerprint : ExpressionFingerprint
     {
         public BinaryExpressionFingerprint(ExpressionType nodeType, Type type, MethodInfo method)
             : base(nodeType, type)
@@ -75,14 +75,14 @@ namespace Epoxide.ExpressionUtil
             return base.GetHashCode();
         }
 
-        internal override void AddToHashCodeCombiner(HashCodeCombiner combiner)
+        public override void AddToHashCodeCombiner(HashCodeCombiner combiner)
         {
             combiner.AddObject(Method);
             base.AddToHashCodeCombiner(combiner);
         }
     }
 
-    internal static class CachedExpressionCompiler
+    public static class CachedExpressionCompiler
     {
         // This is the entry point to the cached expression compilation system. The system
         // will try to turn the expression into an actual delegate as quickly as possible,
@@ -217,7 +217,7 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal sealed class ConditionalExpressionFingerprint : ExpressionFingerprint
+    public sealed class ConditionalExpressionFingerprint : ExpressionFingerprint
     {
         public ConditionalExpressionFingerprint(ExpressionType nodeType, Type type)
             : base(nodeType, type)
@@ -239,7 +239,7 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal sealed class ConstantExpressionFingerprint : ExpressionFingerprint
+    public sealed class ConstantExpressionFingerprint : ExpressionFingerprint
     {
         public ConstantExpressionFingerprint(ExpressionType nodeType, Type type)
             : base(nodeType, type)
@@ -261,7 +261,7 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal sealed class DefaultExpressionFingerprint : ExpressionFingerprint
+    public sealed class DefaultExpressionFingerprint : ExpressionFingerprint
     {
         public DefaultExpressionFingerprint(ExpressionType nodeType, Type type)
             : base(nodeType, type)
@@ -283,7 +283,7 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal abstract class ExpressionFingerprint
+    public abstract class ExpressionFingerprint
     {
         protected ExpressionFingerprint(ExpressionType nodeType, Type type)
         {
@@ -297,7 +297,7 @@ namespace Epoxide.ExpressionUtil
         // the CLR type resulting from this expression, e.g. int, string, etc.
         public Type Type { get; private set; }
 
-        internal virtual void AddToHashCodeCombiner(HashCodeCombiner combiner)
+        public virtual void AddToHashCodeCombiner(HashCodeCombiner combiner)
         {
             combiner.AddInt32((int)NodeType);
             combiner.AddObject(Type);
@@ -323,7 +323,7 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal sealed class ExpressionFingerprintChain : IEquatable<ExpressionFingerprintChain>
+    public sealed class ExpressionFingerprintChain : IEquatable<ExpressionFingerprintChain>
     {
         public readonly List<ExpressionFingerprint> Elements = new List<ExpressionFingerprint>();
 
@@ -367,7 +367,7 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal sealed class FingerprintingExpressionVisitor : ExpressionVisitor
+    public sealed class FingerprintingExpressionVisitor : ExpressionVisitor
     {
         private readonly List<object> _seenConstants = new List<object>();
         private readonly List<ParameterExpression> _seenParameters = new List<ParameterExpression>();
@@ -655,7 +655,7 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal class HashCodeCombiner
+    public class HashCodeCombiner
     {
         private long _combinedHash64 = 0x1505L;
 
@@ -706,9 +706,9 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal delegate TValue Hoisted<in TModel, out TValue>(TModel model, List<object> capturedConstants);
+    public delegate TValue Hoisted<in TModel, out TValue>(TModel model, List<object> capturedConstants);
 
-    internal sealed class HoistingExpressionVisitor<TIn, TOut> : ExpressionVisitor
+    public sealed class HoistingExpressionVisitor<TIn, TOut> : ExpressionVisitor
     {
         private static readonly ParameterExpression _hoistedConstantsParamExpr = Expression.Parameter(typeof(List<object>), "hoistedConstants");
         private int _numConstantsProcessed;
@@ -735,7 +735,7 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal sealed class IndexExpressionFingerprint : ExpressionFingerprint
+    public sealed class IndexExpressionFingerprint : ExpressionFingerprint
     {
         public IndexExpressionFingerprint(ExpressionType nodeType, Type type, PropertyInfo indexer)
             : base(nodeType, type)
@@ -762,14 +762,14 @@ namespace Epoxide.ExpressionUtil
             return base.GetHashCode();
         }
 
-        internal override void AddToHashCodeCombiner(HashCodeCombiner combiner)
+        public override void AddToHashCodeCombiner(HashCodeCombiner combiner)
         {
             combiner.AddObject(Indexer);
             base.AddToHashCodeCombiner(combiner);
         }
     }
 
-    internal sealed class LambdaExpressionFingerprint : ExpressionFingerprint
+    public sealed class LambdaExpressionFingerprint : ExpressionFingerprint
     {
         public LambdaExpressionFingerprint(ExpressionType nodeType, Type type)
             : base(nodeType, type)
@@ -791,7 +791,7 @@ namespace Epoxide.ExpressionUtil
         }
     }
 
-    internal sealed class MemberExpressionFingerprint : ExpressionFingerprint
+    public sealed class MemberExpressionFingerprint : ExpressionFingerprint
     {
         public MemberExpressionFingerprint(ExpressionType nodeType, Type type, MemberInfo member)
             : base(nodeType, type)
@@ -815,14 +815,14 @@ namespace Epoxide.ExpressionUtil
             return base.GetHashCode();
         }
 
-        internal override void AddToHashCodeCombiner(HashCodeCombiner combiner)
+        public override void AddToHashCodeCombiner(HashCodeCombiner combiner)
         {
             combiner.AddObject(Member);
             base.AddToHashCodeCombiner(combiner);
         }
     }
 
-    internal sealed class MethodCallExpressionFingerprint : ExpressionFingerprint
+    public sealed class MethodCallExpressionFingerprint : ExpressionFingerprint
     {
         public MethodCallExpressionFingerprint(ExpressionType nodeType, Type type, MethodInfo method)
             : base(nodeType, type)
@@ -849,14 +849,14 @@ namespace Epoxide.ExpressionUtil
             return base.GetHashCode();
         }
 
-        internal override void AddToHashCodeCombiner(HashCodeCombiner combiner)
+        public override void AddToHashCodeCombiner(HashCodeCombiner combiner)
         {
             combiner.AddObject(Method);
             base.AddToHashCodeCombiner(combiner);
         }
     }
 
-    internal sealed class ParameterExpressionFingerprint : ExpressionFingerprint
+    public sealed class ParameterExpressionFingerprint : ExpressionFingerprint
     {
         public ParameterExpressionFingerprint(ExpressionType nodeType, Type type, int parameterIndex)
             : base(nodeType, type)
@@ -880,14 +880,14 @@ namespace Epoxide.ExpressionUtil
             return base.GetHashCode();
         }
 
-        internal override void AddToHashCodeCombiner(HashCodeCombiner combiner)
+        public override void AddToHashCodeCombiner(HashCodeCombiner combiner)
         {
             combiner.AddInt32(ParameterIndex);
             base.AddToHashCodeCombiner(combiner);
         }
     }
 
-    internal sealed class TypeBinaryExpressionFingerprint : ExpressionFingerprint
+    public sealed class TypeBinaryExpressionFingerprint : ExpressionFingerprint
     {
         public TypeBinaryExpressionFingerprint(ExpressionType nodeType, Type type, Type typeOperand)
             : base(nodeType, type)
@@ -911,14 +911,14 @@ namespace Epoxide.ExpressionUtil
             return base.GetHashCode();
         }
 
-        internal override void AddToHashCodeCombiner(HashCodeCombiner combiner)
+        public override void AddToHashCodeCombiner(HashCodeCombiner combiner)
         {
             combiner.AddObject(TypeOperand);
             base.AddToHashCodeCombiner(combiner);
         }
     }
 
-    internal sealed class UnaryExpressionFingerprint : ExpressionFingerprint
+    public sealed class UnaryExpressionFingerprint : ExpressionFingerprint
     {
         public UnaryExpressionFingerprint(ExpressionType nodeType, Type type, MethodInfo method)
             : base(nodeType, type)
@@ -945,7 +945,7 @@ namespace Epoxide.ExpressionUtil
             return base.GetHashCode();
         }
 
-        internal override void AddToHashCodeCombiner(HashCodeCombiner combiner)
+        public override void AddToHashCodeCombiner(HashCodeCombiner combiner)
         {
             combiner.AddObject(Method);
             base.AddToHashCodeCombiner(combiner);
