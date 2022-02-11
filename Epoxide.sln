@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30114.105
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{2CC55E37-174F-4EFA-A488-FED3BB257A03}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Epoxide", "src\Epoxide\Epoxide.csproj", "{C4CEB4F7-4549-491B-8517-D9F1F5FB4384}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{857C53CE-8760-4DA4-BF77-AC5AE9E4BC03}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Epoxide.Tests", "tests\Epoxide.Tests\Epoxide.Tests.csproj", "{A4265E38-F078-4580-BA90-15E46168BCD6}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C4CEB4F7-4549-491B-8517-D9F1F5FB4384}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C4CEB4F7-4549-491B-8517-D9F1F5FB4384}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C4CEB4F7-4549-491B-8517-D9F1F5FB4384}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C4CEB4F7-4549-491B-8517-D9F1F5FB4384}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A4265E38-F078-4580-BA90-15E46168BCD6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A4265E38-F078-4580-BA90-15E46168BCD6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A4265E38-F078-4580-BA90-15E46168BCD6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A4265E38-F078-4580-BA90-15E46168BCD6}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{C4CEB4F7-4549-491B-8517-D9F1F5FB4384} = {2CC55E37-174F-4EFA-A488-FED3BB257A03}
+		{A4265E38-F078-4580-BA90-15E46168BCD6} = {857C53CE-8760-4DA4-BF77-AC5AE9E4BC03}
+	EndGlobalSection
+EndGlobal
