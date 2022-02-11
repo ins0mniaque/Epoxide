@@ -1,4 +1,8 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq.Expressions;
+using System.Reflection;
+using System.Xml.Serialization;
 
 namespace Epoxide;
 
@@ -25,6 +29,54 @@ public class SentinelPropogationVisitor : MemberNullPropogationVisitor
             return new MemberNullPropogationVisitor ( ).Visit ( node.Left );
 
         return base.VisitBinary ( node );
+    }
+}
+
+public class EnumerableToQueryableVisitor : ExpressionVisitor
+{
+    protected override Expression VisitMethodCall ( MethodCallExpression node )
+    {
+        if ( node.Method.DeclaringType == typeof ( Enumerable ) )
+        {
+            var test = FindQueryableMethod(node.Method.Name, node.Method.GetParameters (  ).Select ( p => p.ParameterType ).ToArray ( ));
+            if ( test == null )
+                return base.VisitMethodCall ( node );
+
+            var qd = typeof(Queryable).GetMethods (  ).FirstOrDefault(m => m.Name== nameof(Queryable.AsQueryable) &&
+                                                                           m.IsGenericMethodDefinition).MakeGenericMethod ( node.Arguments[0].Type.GetGenericArguments (  )[0]);
+
+            var q = typeof ( IQueryable ).IsAssignableFrom ( node.Arguments[0].Type ) ? node.Arguments[0] : Expression.Call ( qd, node.Arguments[0] );
+            var x = Expression.Call ( test, node.Arguments.Select ( (a, i) => i == 0 ? q : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Constant ( a ) : a ) );
+
+            return x;
+        }
+
+        return base.VisitMethodCall ( node );
+    }
+
+    private static ILookup<string, MethodInfo> s_seqMethods;
+    private static HashSet<string> s_nonSeqMethods;
+    private static MethodInfo FindQueryableMethod(string name, params Type[] typeArgs)
+    {
+        var generic = typeArgs.Skip ( 1 ).Select ( p => p.IsGenericType ? p.GetGenericTypeDefinition ( ) : p ).ToArray ( );
+        var asExpr =  typeArgs.Length > 1 && typeArgs [ 1 ].IsGenericType ? typeArgs [ 1 ].GetGenericArguments ( ) :
+                      typeArgs [ 0 ].GetGenericArguments ( );
+        if (s_seqMethods == null)
+        {
+            s_seqMethods = typeof(Queryable).GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .ToLookup(m => m.Name);
+            s_nonSeqMethods = typeof(Enumerable).GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .Select(m => m.Name).Except ( s_seqMethods.Select ( a => a.Key ) ).ToHashSet ( );
+        }
+
+        if ( s_nonSeqMethods.Contains ( name ) )
+            return null;
+
+        var mi = s_seqMethods[name].FirstOrDefault(m => m.GetParameters (  ).Skip ( 1 ).Select ( p => p.ParameterType.IsGenericType ? p.ParameterType.GetGenericArguments (  )[0].GetGenericTypeDefinition ( ) : p.ParameterType) .SequenceEqual ( generic));
+
+        if (asExpr != null)
+            return mi.MakeGenericMethod(asExpr);
+        return mi;
     }
 }
 
