@@ -141,12 +141,17 @@ public class BindingTests
         var left  = (IReadOnlyCollection<string>?) null;
         var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
 
-        DefaultBinder.Bind ( ( ) => left == right.Select ( i => i.ToString ( ) ).ToList ( ) );
+        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ).ToList ( ) );
 
         Assert.NotNull ( left );
         Assert.Empty   ( left );
 
         right.Add ( 42 );
+
+        Assert.Single ( left );
+        Assert.Equal  ( "42", left.First ( ) );
+
+        right.Add ( 0 );
 
         Assert.Single ( left );
         Assert.Equal  ( "42", left.First ( ) );

@@ -29,59 +29,6 @@ public class SentinelPropogationVisitor : MemberNullPropogationVisitor
     }
 }
 
-public class EnumerableToQueryableVisitor : ExpressionVisitor
-{
-    protected override Expression VisitMethodCall ( MethodCallExpression node )
-    {
-        if ( node.Method.DeclaringType == typeof ( Enumerable ) )
-        {
-            var test = FindQueryableMethod(node.Method.Name, node.Method.GetParameters (  ).Select ( p => p.ParameterType ).ToArray ( ));
-            if ( test == null )
-                return base.VisitMethodCall ( node );
-
-            var arg0 = node.Arguments[0];
-
-            arg0 = Visit ( arg0 );
-
-            var asBindable = typeof(BindableQueryable).GetMethod ( nameof(BindableQueryable.AsBindable) ).MakeGenericMethod ( arg0.Type.GetGenericArguments (  )[0]);
-
-            arg0 = typeof ( IQueryable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0 );
-
-            var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Lambda ( a ) : a );
-
-            return Expression.Call ( test, arguments );
-        }
-
-        return base.VisitMethodCall ( node );
-    }
-
-    private static ILookup<string, MethodInfo> s_seqMethods;
-    private static HashSet<string> s_nonSeqMethods;
-    private static MethodInfo FindQueryableMethod(string name, params Type[] typeArgs)
-    {
-        var generic = typeArgs.Skip ( 1 ).Select ( p => p.IsGenericType ? p.GetGenericTypeDefinition ( ) : p ).ToArray ( );
-        var asExpr =  typeArgs.Length > 1 && typeArgs [ 1 ].IsGenericType ? typeArgs [ 1 ].GetGenericArguments ( ) :
-                      typeArgs [ 0 ].GetGenericArguments ( );
-        if (s_seqMethods == null)
-        {
-            s_seqMethods = typeof(Queryable).GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .Concat ( typeof(BindableQueryable).GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic) )
-                .ToLookup(m => m.Name);
-            s_nonSeqMethods = typeof(Enumerable).GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .Select(m => m.Name).Except ( s_seqMethods.Select ( a => a.Key ) ).ToHashSet ( );
-        }
-
-        if ( s_nonSeqMethods.Contains ( name ) )
-            return null;
-
-        var mi = s_seqMethods[name].FirstOrDefault(m => m.GetParameters (  ).Skip ( 1 ).Select ( p => p.ParameterType.IsGenericType ? p.ParameterType.GetGenericArguments (  )[0].GetGenericTypeDefinition ( ) : p.ParameterType) .SequenceEqual ( generic));
-
-        if (asExpr != null)
-            return mi.MakeGenericMethod(asExpr);
-        return mi;
-    }
-}
-
 public class MemberNullPropogationVisitor : ExpressionVisitor
 {
     protected override Expression VisitMember(MemberExpression node)
@@ -124,5 +71,90 @@ public class MemberNullPropogationVisitor : ExpressionVisitor
             return true;
         return type.IsGenericType &&
             type.GetGenericTypeDefinition() == typeof(Nullable<>);
+    }
+}
+
+public class EnumerableToQueryableVisitor : ExpressionVisitor
+{
+    private static MethodInfo? asBindableMethod;
+
+    protected override Expression VisitMethodCall ( MethodCallExpression node )
+    {
+        if ( node.Method.DeclaringType == typeof ( Enumerable ) )
+        {
+            var queryableMethod = FindQueryableMethod ( node.Method );
+            if ( queryableMethod == null )
+                return base.VisitMethodCall ( node );
+
+            asBindableMethod ??= typeof ( BindableQueryable ).GetMethod ( nameof ( BindableQueryable.AsBindable ) );
+
+            var arg0 = Visit ( node.Arguments [ 0 ] );
+
+            var asBindable = asBindableMethod.MakeGenericMethod ( arg0.Type.GetGenericArguments ( ) [ 0 ] );
+
+            arg0 = typeof ( IQueryable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0 );
+
+            var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Lambda ( a ) : a );
+
+            return Expression.Call ( queryableMethod, arguments );
+        }
+
+        return base.VisitMethodCall ( node );
+    }
+
+    private class QueryableMethod
+    {
+        public QueryableMethod ( MethodInfo method )
+        {
+            Method        = method;
+            ArgumentTypes = GetQueryableMethodArgumentTypes ( method );
+        }
+
+        public MethodInfo Method        { get; }
+        public Type [ ]   ArgumentTypes { get; }
+    }
+
+    private static ILookup < string, QueryableMethod >? queryableMethods;
+    private static HashSet < string >?                  enumerableMethodsWithoutEquivalents;
+
+    private static MethodInfo? FindQueryableMethod(MethodInfo method)
+    {
+        const BindingFlags Extensions = BindingFlags.Static | BindingFlags.Public;
+
+        queryableMethods ??= typeof ( Queryable ).GetMethods ( Extensions )
+            .Concat ( typeof ( BindableQueryable ).GetMethods ( Extensions ) )
+            .Select ( m => new QueryableMethod ( m ) )
+            .ToLookup ( q => q.Method.Name );
+
+        enumerableMethodsWithoutEquivalents ??= typeof ( Enumerable ).GetMethods ( Extensions )
+            .Select ( m => m.Name )
+            .Except ( queryableMethods.Select ( q => q.Key ) )
+            .ToHashSet ( );
+
+        if ( enumerableMethodsWithoutEquivalents.Contains ( method.Name ) )
+            return null;
+
+        var argumentTypes   = GetEnumerableMethodArgumentTypes ( method );
+        var queryableMethod = queryableMethods [ method.Name ].FirstOrDefault ( q => q.ArgumentTypes.SequenceEqual ( argumentTypes ) );
+
+        return queryableMethod?.Method.MakeGenericMethod ( method.GetGenericArguments ( ) );
+    }
+
+    private static Type [ ] GetEnumerableMethodArgumentTypes ( MethodInfo method )
+    {
+        return method.GetParameters ( )
+                     .Skip          ( 1 )
+                     .Select        ( parameter => parameter.ParameterType )
+                     .Select        ( type      => type.IsGenericType ? type.GetGenericTypeDefinition ( ) : type )
+                     .ToArray       ( );
+    }
+
+    private static Type [ ] GetQueryableMethodArgumentTypes ( MethodInfo method )
+    {
+        return method.GetParameters ( )
+                     .Skip          ( 1 )
+                     .Select        ( parameter => parameter.ParameterType )
+                     .Select        ( type      => type.IsGenericType && type.GetGenericArguments ( ) [ 0 ] is { } a && a.IsGenericType ? a.GetGenericTypeDefinition ( ) : type )
+                     .ToArray       ( );
     }
 }
