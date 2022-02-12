@@ -5,7 +5,7 @@ using System.Linq.Expressions;
 
 namespace Epoxide;
 
-public static class BindableQueryable
+public static class BindableEnumerable
 {
     public static IQueryable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source)
     {
@@ -14,29 +14,44 @@ public static class BindableQueryable
         return provider.CreateQuery<TElement>(q.Expression);
     }
 
+    public static TCollection ToList <TCollection, TElement>(this IEnumerable<TElement> source)
+        where TCollection : ICollection<TElement>, new ( )
+    {
+        var output = new TCollection ( );
+        foreach ( var item in source )
+            output.Add ( item );
+
+        return output;
+    }
+}
+
+public static class BindableQueryable
+{
     public static IReadOnlyList<TElement> ToList <TElement>(this IQueryable<TElement> source)
     {
+        return ToList<ObservableCollection<TElement>, TElement>(source);
+    }
+
+
+    public static TCollection ToList <TCollection, TElement>(this IQueryable<TElement> source)
+        where TCollection : ICollection<TElement>, new ( )
+    {
+        var output = source.AsEnumerable ( ).ToList <TCollection, TElement> ( );
+
         if ( source is BindableQuery<TElement> magic )
         {
             if (( (BindableQueryProvider) magic.Provider ).Source is INotifyCollectionChanged ncc )
             {
-                var output = new ObservableCollection < TElement > ( source );
-
                 ncc.CollectionChanged += (o, e) =>
                 {
                     output.Clear ( );
                     foreach ( var item in source )
                         output.Add ( item );
                 };
-
-                return output;
             }
-            
-
-            return source.AsEnumerable ( ).ToList ( );
         }
 
-        return source.AsEnumerable ( ).ToList ( );
+        return output;
     }
 }
 

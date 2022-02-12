@@ -105,17 +105,13 @@ public class BindingTests
     }
 
     [ Fact ]
-    public void Magic ( )
+    public void AutoConvert ( )
     {
-        var right = "";
+        var right = 0.0;
 
-        DefaultBinder.Bind ( ( ) => Method ( ).ToString ( ) == right );
+        DefaultBinder.Bind ( ( ) => Method ( ) == right );
 
-        Assert.Equal ( right, "33" );
-
-        DefaultBinder.Bind ( ( ) => Method ( ).GetType (  ).Name.ToString ( ) == right );
-
-        Assert.Equal ( right, "Int32" );
+        Assert.Equal ( 33.0, right );
     }
 
     [ Fact ]
@@ -142,6 +138,59 @@ public class BindingTests
         var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
 
         DefaultBinder.Bind ( ( ) => left == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ).ToList ( ) );
+
+        Assert.NotNull ( left );
+        Assert.Empty   ( left );
+
+        right.Add ( 42 );
+
+        Assert.Single ( left );
+        Assert.Equal  ( "42", left.First ( ) );
+
+        right.Add ( 0 );
+
+        Assert.Single ( left );
+        Assert.Equal  ( "42", left.First ( ) );
+    }
+
+    [ Fact ]
+    public void ReuseCollection ( )
+    {
+        var collection = new System.Collections.ObjectModel.ObservableCollection<string> ();
+
+        var left  = collection;
+        var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
+
+        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ) );
+
+        Assert.NotNull ( left );
+        Assert.Empty   ( left );
+
+        right.Add ( 42 );
+
+        Assert.Single ( left );
+        Assert.Equal  ( "42", left.First ( ) );
+
+        right.Add ( 0 );
+
+        Assert.Single ( left );
+        Assert.Equal  ( "42", left.First ( ) );
+
+        Assert.Same ( collection, left );
+    }
+
+    private class CustomObservableCollection < T > : System.Collections.ObjectModel.ObservableCollection<T>
+    {
+
+    }
+
+    [ Fact ]
+    public void CustomCollection ( )
+    {
+        var left  = (CustomObservableCollection<string>?) null;
+        var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
+
+        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ) );
 
         Assert.NotNull ( left );
         Assert.Empty   ( left );

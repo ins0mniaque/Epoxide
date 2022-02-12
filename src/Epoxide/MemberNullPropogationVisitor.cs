@@ -74,19 +74,51 @@ public class MemberNullPropogationVisitor : ExpressionVisitor
     }
 }
 
+public class EnumerableToCollectionVisitor : ExpressionVisitor
+{
+    private static MethodInfo? toListMethod;
+
+    public EnumerableToCollectionVisitor ( Type returnType )
+    {
+        ReturnType = returnType;
+    }
+
+    public Type ReturnType { get; }
+
+    public override Expression Visit ( Expression node )
+    {
+        if ( node.Type == ReturnType )
+            return node;
+
+        if ( node.Type.IsGenericType && node.Type.GetGenericTypeDefinition ( ) == typeof ( IEnumerable < > ) )
+        {
+            if ( ReturnType.IsGenericType && typeof ( ICollection < > ).MakeGenericType ( ReturnType.GetGenericArguments ( ) [ 0 ] ).IsAssignableFrom ( ReturnType ) )
+            {
+                toListMethod ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.ToList ) );
+
+                var toList = toListMethod.MakeGenericMethod ( ReturnType, node.Type.GetGenericArguments ( ) [ 0 ] );
+
+                return Expression.Call ( toList, node );
+            }
+        }
+
+        return node;
+    }
+}
+
 public class EnumerableToQueryableVisitor : ExpressionVisitor
 {
     private static MethodInfo? asBindableMethod;
 
     protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
-        if ( node.Method.DeclaringType == typeof ( Enumerable ) )
+        if ( node.Method.DeclaringType == typeof ( Enumerable ) || node.Method.DeclaringType == typeof ( BindableEnumerable ) )
         {
             var queryableMethod = FindQueryableMethod ( node.Method );
             if ( queryableMethod == null )
                 return base.VisitMethodCall ( node );
 
-            asBindableMethod ??= typeof ( BindableQueryable ).GetMethod ( nameof ( BindableQueryable.AsBindable ) );
+            asBindableMethod ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.AsBindable ) );
 
             var arg0 = Visit ( node.Arguments [ 0 ] );
 
@@ -106,12 +138,14 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
     {
         public QueryableMethod ( MethodInfo method )
         {
-            Method        = method;
-            ArgumentTypes = GetQueryableMethodArgumentTypes ( method );
+            Method           = method;
+            GenericTypeCount = method.GetGenericArguments ( ).Length;
+            ArgumentTypes    = GetQueryableMethodArgumentTypes ( method );
         }
 
-        public MethodInfo Method        { get; }
-        public Type [ ]   ArgumentTypes { get; }
+        public MethodInfo Method           { get; }
+        public int        GenericTypeCount { get; }
+        public Type [ ]   ArgumentTypes    { get; }
     }
 
     private static ILookup < string, QueryableMethod >? queryableMethods;
@@ -127,6 +161,7 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
             .ToLookup ( q => q.Method.Name );
 
         enumerableMethodsWithoutEquivalents ??= typeof ( Enumerable ).GetMethods ( Extensions )
+            .Concat ( typeof ( BindableEnumerable ).GetMethods ( Extensions ) )
             .Select ( m => m.Name )
             .Except ( queryableMethods.Select ( q => q.Key ) )
             .ToHashSet ( );
@@ -134,8 +169,10 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
         if ( enumerableMethodsWithoutEquivalents.Contains ( method.Name ) )
             return null;
 
-        var argumentTypes   = GetEnumerableMethodArgumentTypes ( method );
-        var queryableMethod = queryableMethods [ method.Name ].FirstOrDefault ( q => q.ArgumentTypes.SequenceEqual ( argumentTypes ) );
+        var genericTypeCount = method.GetGenericArguments ( ).Length;
+        var argumentTypes    = GetEnumerableMethodArgumentTypes ( method );
+        var queryableMethod  = queryableMethods [ method.Name ].FirstOrDefault ( q => q.GenericTypeCount == genericTypeCount &&
+                                                                                      q.ArgumentTypes.SequenceEqual ( argumentTypes ) );
 
         return queryableMethod?.Method.MakeGenericMethod ( method.GetGenericArguments ( ) );
     }

@@ -233,8 +233,8 @@ public sealed class Binding : IBinding
         MemberObserver = observer;
         Scheduler = scheduler;
 
-        this.left = left = new EnumerableToQueryableVisitor().Visit ( left );
-        this.right = right = new EnumerableToQueryableVisitor().Visit ( right );
+        this.left = left = new EnumerableToQueryableVisitor().Visit ( new EnumerableToCollectionVisitor ( right.Type ).Visit ( left ) );
+        this.right = right = new EnumerableToQueryableVisitor().Visit ( new EnumerableToCollectionVisitor ( left.Type ).Visit ( right ) );
 
         leftTriggers = Trigger.EnumerateTriggers ( left ).ToList ( );
         rightTriggers = Trigger.EnumerateTriggers ( right ).ToList ( );
