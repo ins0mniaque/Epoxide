@@ -1,8 +1,5 @@
-using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Xml.Serialization;
 
 namespace Epoxide;
 
@@ -10,7 +7,7 @@ public class SentinelPropogationVisitor : MemberNullPropogationVisitor
 {
     public static object Sentinel { get; } = new ( );
 
-    public Expression Visit2 ( Expression node )
+    public Expression VisitAndAddSentinelSupport ( Expression node )
     {
         var x = Visit ( node );
 
@@ -42,13 +39,17 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
             if ( test == null )
                 return base.VisitMethodCall ( node );
 
-            var qd = typeof(Queryable).GetMethods (  ).FirstOrDefault(m => m.Name== nameof(Queryable.AsQueryable) &&
-                                                                           m.IsGenericMethodDefinition).MakeGenericMethod ( node.Arguments[0].Type.GetGenericArguments (  )[0]);
+            var arg0 = node.Arguments[0];
 
-            var q = typeof ( IQueryable ).IsAssignableFrom ( node.Arguments[0].Type ) ? node.Arguments[0] : Expression.Call ( qd, node.Arguments[0] );
-            var x = Expression.Call ( test, node.Arguments.Select ( (a, i) => i == 0 ? q : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Constant ( a ) : a ) );
+            arg0 = Visit ( arg0 );
 
-            return x;
+            var asBindable = typeof(BindableQueryable).GetMethod ( nameof(BindableQueryable.AsBindable) ).MakeGenericMethod ( arg0.Type.GetGenericArguments (  )[0]);
+
+            arg0 = typeof ( IQueryable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0 );
+
+            var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Lambda ( a ) : a );
+
+            return Expression.Call ( test, arguments );
         }
 
         return base.VisitMethodCall ( node );
@@ -64,6 +65,7 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
         if (s_seqMethods == null)
         {
             s_seqMethods = typeof(Queryable).GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .Concat ( typeof(BindableQueryable).GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic) )
                 .ToLookup(m => m.Name);
             s_nonSeqMethods = typeof(Enumerable).GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
                 .Select(m => m.Name).Except ( s_seqMethods.Select ( a => a.Key ) ).ToHashSet ( );

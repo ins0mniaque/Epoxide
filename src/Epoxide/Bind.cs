@@ -107,7 +107,7 @@ public class NoScheduler : IBindingScheduler
 {
     public void Schedule ( Expression expr, Action < object > callback )
     {
-        var coalescing = new SentinelPropogationVisitor ( ).Visit2 ( expr );
+        var coalescing = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( expr );
         var value = CachedExpressionCompiler.Evaluate ( coalescing );
 
         if ( value != SentinelPropogationVisitor.Sentinel )
@@ -116,7 +116,7 @@ public class NoScheduler : IBindingScheduler
 
     public void ScheduleChange ( Expression expr, Expression valueExpression, MemberChangedCallback2 callback )
     {
-        var coalescing = new SentinelPropogationVisitor ( ).Visit2 ( valueExpression );
+        var coalescing = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( valueExpression );
         var value = CachedExpressionCompiler.Evaluate ( coalescing );
 
         if ( value == SentinelPropogationVisitor.Sentinel )
@@ -146,7 +146,7 @@ public class NoScheduler : IBindingScheduler
 
         var m = (MemberExpression) targetExpr;
 
-        var anotherExpr = new SentinelPropogationVisitor ( ).Visit2 ( m.Expression );
+        var anotherExpr = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( m.Expression );
 
         var target = CachedExpressionCompiler.Evaluate ( anotherExpr );
         if ( target == SentinelPropogationVisitor.Sentinel )
@@ -175,7 +175,7 @@ public static class DefaultBinder
         if ( body.NodeType == ExpressionType.MemberAccess )
         {
             var m = (MemberExpression) body;
-            var x = new SentinelPropogationVisitor ( ).Visit2 ( m.Expression );
+            var x = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( m.Expression );
             if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != SentinelPropogationVisitor.Sentinel )
                 factory.MemberObserver.Invalidate ( obj, m.Member, 0 );
         }
@@ -233,8 +233,11 @@ public sealed class Binding : IBinding
         MemberObserver = observer;
         Scheduler = scheduler;
 
-        leftTriggers = Trigger.EnumerateTriggers ( this.left = left ).ToList ( );
-        rightTriggers = Trigger.EnumerateTriggers ( this.right = right ).ToList ( );
+        this.left = left = new EnumerableToQueryableVisitor().Visit ( left );
+        this.right = right = new EnumerableToQueryableVisitor().Visit ( right );
+
+        leftTriggers = Trigger.EnumerateTriggers ( left ).ToList ( );
+        rightTriggers = Trigger.EnumerateTriggers ( right ).ToList ( );
 
         if ( ExprHelper.IsWritable ( left ) )
         {
