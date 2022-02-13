@@ -154,29 +154,36 @@ public class BindingTests
     }
 
     [ Fact ]
-    public void ReuseCollection ( )
+    public void ReadOnlyCollectionProperty ( )
     {
         var collection = new System.Collections.ObjectModel.ObservableCollection<string> ();
 
-        var left  = collection;
+        var left  = new { Collection = collection };
         var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
 
-        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ) );
+        DefaultBinder.Bind ( ( ) => left.Collection == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ) );
 
-        Assert.NotNull ( left );
-        Assert.Empty   ( left );
+        Assert.NotNull ( left.Collection );
+        Assert.Empty   ( left.Collection );
 
         right.Add ( 42 );
 
-        Assert.Single ( left );
-        Assert.Equal  ( "42", left.First ( ) );
+        Assert.Single ( left.Collection );
+        Assert.Equal  ( "42", left.Collection.First ( ) );
 
         right.Add ( 0 );
 
-        Assert.Single ( left );
-        Assert.Equal  ( "42", left.First ( ) );
+        Assert.Single ( left.Collection );
+        Assert.Equal  ( "42", left.Collection.First ( ) );
 
-        Assert.Same ( collection, left );
+        Assert.Same ( collection, left.Collection );
+
+        DefaultBinder.Invalidate ( ( ) => right );
+
+        Assert.Single ( left.Collection );
+        Assert.Equal  ( "42", left.Collection.First ( ) );
+
+        Assert.Same ( collection, left.Collection );
     }
 
     private class CustomObservableCollection < T > : System.Collections.ObjectModel.ObservableCollection<T>

@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -69,11 +70,34 @@ public static class ExprHelper
                ( (MemberExpression) expr ).Member is PropertyInfo { CanWrite: true } or FieldInfo;
     }
 
+    public static bool IsReadOnlyCollection ( Expression expr )
+    {
+        return expr.NodeType == ExpressionType.MemberAccess &&
+               ( (MemberExpression) expr ).Member is PropertyInfo { CanRead: true, CanWrite: false } p &&
+               GetGenericInterfaceArguments ( p.PropertyType, typeof ( ICollection < > ) ) != null;
+    }
+
     public static MemberInfo? GetMemberInfo ( Expression expr )
     {
         return expr.NodeType == ExpressionType.MemberAccess &&
                ( (MemberExpression) expr ).Member is PropertyInfo { CanWrite: true } or FieldInfo ?
             ( (MemberExpression) expr ).Member : null;
+    }
+
+    public static Type [ ]? GetGenericInterfaceArguments(Type type, Type genericInterface)
+    {
+        foreach (Type @interface in type.GetInterfaces())
+        {
+            if (@interface.IsGenericType)
+            {
+                if (@interface.GetGenericTypeDefinition() == genericInterface)
+                {
+                    return @interface.GetGenericArguments();
+                }
+            }
+        }
+
+        return null;
     }
 
     public static void SetValue ( this MemberInfo member, object target, object value )
@@ -109,6 +133,23 @@ public class NoScheduler : IBindingScheduler
     {
         var coalescing = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( expr );
         var value = CachedExpressionCompiler.Evaluate ( coalescing );
+
+        if ( value == SentinelPropogationVisitor.Sentinel )
+        {
+            if ( expr is MemberExpression mmm )
+                expr = mmm.Expression;
+            else if ( expr is MethodCallExpression ccc )
+                expr = ccc.Object;
+
+            if ( expr is MemberExpression or MethodCallExpression )
+            {
+                expr = new MemberNullPropogationVisitor ( ).Visit ( expr );
+                if ( CachedExpressionCompiler.Evaluate ( expr ) == null )
+                    return;
+            }
+
+            value = null;
+        }
 
         if ( value != SentinelPropogationVisitor.Sentinel )
             callback ( value );
@@ -243,6 +284,10 @@ public sealed class Binding : IBinding
         {
             Scheduler.ScheduleChange ( left, right, CallbackAndSubscribe );
         }
+        else if (!ExprHelper.IsWritable(right) && ExprHelper.IsReadOnlyCollection(left) )
+        {
+            Scheduler.Schedule ( collectionExpression = left, SubscribeToCollection );
+        }
         else
         {
             Scheduler.ScheduleChange ( right, left, CallbackAndSubscribe );
@@ -255,6 +300,65 @@ public sealed class Binding : IBinding
 
         Resubscribe ( leftTriggers, left, right );
         Resubscribe ( rightTriggers, right, left );
+    }
+
+    private Expression?  collectionExpression;
+    private IDisposable? collectionSubscription;
+
+    private void SubscribeToCollection ( object? leftValue )
+    {
+        if ( leftValue == null )
+        {
+            Resubscribe ( leftTriggers, left, right );
+            Resubscribe ( rightTriggers, right, left );
+
+            return;
+        }
+
+        Scheduler.Schedule ( right, rightValue =>
+        {
+            collectionSubscription = BindCollections2 ( leftValue, rightValue );
+
+            Resubscribe ( leftTriggers, left, right );
+            Resubscribe ( rightTriggers, right, left );
+        } );
+    }
+
+    private static IDisposable? BindCollections2 ( object leftValue, object rightValue )
+    {
+        BindCollectionsMethod ??= typeof ( Binding ).GetMethod ( nameof ( BindCollections ), BindingFlags.NonPublic | BindingFlags.Static );
+
+        // TODO: Add non-generic ICollection support
+        var elementType = ExprHelper.GetGenericInterfaceArguments ( leftValue.GetType ( ), typeof ( ICollection < > ) )? [ 0 ];
+        var bindCollections = BindCollectionsMethod.MakeGenericMethod ( elementType );
+
+        return (IDisposable?) bindCollections.Invoke ( null, new [ ] { leftValue, rightValue } );
+    }
+
+    private static MethodInfo? BindCollectionsMethod;
+
+    private static IDisposable? BindCollections < T > ( ICollection < T > leftValue, IEnumerable < T >? rightValue )
+    {
+        leftValue.Clear ( );
+        if ( rightValue != null )
+            foreach ( var item in rightValue )
+                leftValue.Add ( item );
+
+        if ( rightValue is INotifyCollectionChanged ncc )
+        {
+            ncc.CollectionChanged += (o, e) =>
+            {
+                leftValue.Clear ( );
+                if ( rightValue != null )
+                foreach ( var item in rightValue )
+                    leftValue.Add ( item );
+            };
+
+            // TODO: Return disconnecting disposable
+            return null;
+        }
+
+        return null;
     }
 
     private void Callback ( Expression expression, MemberInfo member, object? value )
@@ -286,13 +390,26 @@ public sealed class Binding : IBinding
     {
         if ( activeChangeIds.Contains ( causeChangeId ) ) return;
 
+        if ( dependentExpr == collectionExpression )
+        {
+            collectionSubscription?.Dispose ( );
+            collectionSubscription = null;
+
+            Scheduler.Schedule ( collectionExpression, SubscribeToCollection );
+            return;
+        }
+
         var changeId = nextChangeId++;
         activeChangeIds.Add ( changeId );
-        Scheduler.ScheduleChange ( dependentExpr, expr, (e, m, a) =>
+
+        if ( dependentExpr == collectionExpression )
         {
-            Callback (e, m, a);
-            activeChangeIds.Remove ( changeId );
-        } );
+            Scheduler.ScheduleChange ( dependentExpr, expr, (e, m, a) =>
+            {
+                Callback (e, m, a);
+                activeChangeIds.Remove ( changeId );
+            } );
+        }
     }
 
     static void Unsubscribe ( List<Trigger> triggers )
