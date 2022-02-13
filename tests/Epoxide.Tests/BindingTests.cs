@@ -159,29 +159,33 @@ public class BindingTests
         var collection = new System.Collections.ObjectModel.ObservableCollection<string> ();
 
         var left  = new { Collection = collection };
-        var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
+        var right = new System.Collections.ObjectModel.ObservableCollection<TestObject> ();
 
-        DefaultBinder.Bind ( ( ) => left.Collection == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ) );
+        DefaultBinder.Bind ( ( ) => left.Collection == right.Where ( i => i.State != 0 ).Select ( i => i.State.ToString ( ) ) );
 
         Assert.NotNull ( left.Collection );
         Assert.Empty   ( left.Collection );
 
-        right.Add ( 42 );
+        right.Add ( new TestObject { State = 42 } );
 
         Assert.Single ( left.Collection );
         Assert.Equal  ( "42", left.Collection.First ( ) );
 
-        right.Add ( 0 );
+        right.Add ( new TestObject { State = 0 } );
 
         Assert.Single ( left.Collection );
         Assert.Equal  ( "42", left.Collection.First ( ) );
 
         Assert.Same ( collection, left.Collection );
 
+        collection = new System.Collections.ObjectModel.ObservableCollection<string> ();
+
+        left = new { Collection = collection };
+        
         DefaultBinder.Invalidate ( ( ) => right );
 
-        Assert.Single ( left.Collection );
-        Assert.Equal  ( "42", left.Collection.First ( ) );
+        Assert.Single  ( left.Collection );
+        Assert.Equal   ( "42", left.Collection.First ( ) );
 
         Assert.Same ( collection, left.Collection );
     }

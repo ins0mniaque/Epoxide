@@ -31,6 +31,8 @@ public class SentinelPropogationVisitor : MemberNullPropogationVisitor
 
 public class MemberNullPropogationVisitor : ExpressionVisitor
 {
+    protected override Expression VisitLambda < T > ( Expression < T > node ) => node;
+
     protected override Expression VisitMember(MemberExpression node)
     {
         if (node.Expression == null || !IsNullable(node.Expression.Type))
@@ -51,7 +53,10 @@ public class MemberNullPropogationVisitor : ExpressionVisitor
     protected override Expression VisitMethodCall(MethodCallExpression node)
     {
         if (node.Object == null || !IsNullable(node.Object.Type))
-            return base.VisitMethodCall(node);
+        {
+            Visit ( node.Object );
+            return node;
+        }
 
         var expression = base.Visit(node.Object);
         var nullBaseExpression = Expression.Constant(null, expression.Type);

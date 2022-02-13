@@ -232,25 +232,26 @@ public sealed class Trigger
     public MemberInfo Member;
     public IDisposable? Subscription;
 
-    public static IEnumerable < Trigger > EnumerateTriggers ( Expression s )
+    public static List < Trigger > ExtractTriggers ( Expression s )
     {
-        if ( s is MemberExpression me )
-        {
-            foreach ( var ss in EnumerateTriggers ( me.Expression ) )
-                yield return ss;
+        var extractor = new TriggerExtractorVisitor ( );
+        extractor.Visit ( s );
+        return extractor.Triggers;
+    }
 
-            yield return new Trigger {Expression = me.Expression, Member = me.Member};
-        }
-        else
+    private class TriggerExtractorVisitor : ExpressionVisitor
+    {
+        public List < Trigger > Triggers { get; } = new ( );
+
+        protected override Expression VisitLambda < T > ( Expression < T > node ) => node;
+
+        protected override Expression VisitMember ( MemberExpression node )
         {
-            var b = s as BinaryExpression;
-            if ( b != null )
-            {
-                foreach ( var l in EnumerateTriggers ( b.Left ) )
-                    yield return l;
-                foreach ( var r in EnumerateTriggers ( b.Right ) )
-                    yield return r;
-            }
+            Visit ( node.Expression );
+
+            Triggers.Add ( new Trigger {Expression = node.Expression, Member = node.Member} );
+
+            return node;
         }
     }
 }
@@ -277,8 +278,8 @@ public sealed class Binding : IBinding
         this.left = left = new EnumerableToQueryableVisitor().Visit ( new EnumerableToCollectionVisitor ( right.Type ).Visit ( left ) );
         this.right = right = new EnumerableToQueryableVisitor().Visit ( new EnumerableToCollectionVisitor ( left.Type ).Visit ( right ) );
 
-        leftTriggers = Trigger.EnumerateTriggers ( left ).ToList ( );
-        rightTriggers = Trigger.EnumerateTriggers ( right ).ToList ( );
+        leftTriggers = Trigger.ExtractTriggers ( left );
+        rightTriggers = Trigger.ExtractTriggers ( right );
 
         if ( ExprHelper.IsWritable ( left ) )
         {
@@ -401,15 +402,11 @@ public sealed class Binding : IBinding
 
         var changeId = nextChangeId++;
         activeChangeIds.Add ( changeId );
-
-        if ( dependentExpr == collectionExpression )
+        Scheduler.ScheduleChange ( dependentExpr, expr, (e, m, a) =>
         {
-            Scheduler.ScheduleChange ( dependentExpr, expr, (e, m, a) =>
-            {
-                Callback (e, m, a);
-                activeChangeIds.Remove ( changeId );
-            } );
-        }
+            Callback (e, m, a);
+            activeChangeIds.Remove ( changeId );
+        } );
     }
 
     static void Unsubscribe ( List<Trigger> triggers )
