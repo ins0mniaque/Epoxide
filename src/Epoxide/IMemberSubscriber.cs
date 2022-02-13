@@ -5,10 +5,24 @@ using System.ComponentModel;
 
 namespace Epoxide;
 
-public interface IMemberObserver
+public interface IMemberSubscriber
 {
-    IDisposable? Observe ( object target, MemberInfo member, Action<int> k );
+    IDisposable Subscribe ( object target, MemberInfo member, Action<int> k );
     void Invalidate ( object target, MemberInfo member, int changeId = 0 );
+}
+
+public interface IMemberSubscriptionFactory
+{
+    MemberSubscription? Create ( object target, MemberInfo member, MemberChangedCallback callback );
+}
+
+public class MemberSubscriptionFactory : IMemberSubscriptionFactory
+{
+    public MemberSubscription? Create ( object target, MemberInfo member, MemberChangedCallback callback )
+    {
+        return target is INotifyPropertyChanged npc ? new NotifyPropertyChangedMemberSubscription ( npc,    member, callback ) :
+                                                      new GenericEventMemberSubscription          ( target, member, callback );
+    }
 }
 
 public delegate void MemberChangedCallback ( object target, MemberInfo member );
@@ -51,8 +65,8 @@ public sealed class NotifyPropertyChangedMemberSubscription : MemberSubscription
 
 public sealed class GenericEventMemberSubscription : MemberSubscription
 {
-    EventInfo eventInfo;
-    Delegate eventHandler;
+    EventInfo? eventInfo;
+    Delegate? eventHandler;
 
     public GenericEventMemberSubscription ( object target, MemberInfo member, MemberChangedCallback callback ) : base ( target, member, callback )
     {
@@ -64,8 +78,6 @@ public sealed class GenericEventMemberSubscription : MemberSubscription
         if ( eventInfo == null ) return;
 
         eventInfo.RemoveEventHandler ( Target, eventHandler );
-
-        Debug.WriteLine ( "BIND: Removed handler for {0} on {1}", eventInfo.Name, Target );
 
         eventInfo = null;
         eventHandler = null;
@@ -94,7 +106,7 @@ public sealed class GenericEventMemberSubscription : MemberSubscription
                     : CreateGenericEventHandler ( ev, ( ) => HandleAnyEvent ( null, EventArgs.Empty ) );
 
                 ev.AddEventHandler ( Target, eventHandler );
-                Debug.WriteLine ( "BIND: Added handler for {0} on {1}", eventInfo.Name, Target );
+
                 return true;
             }
         }
@@ -102,13 +114,13 @@ public sealed class GenericEventMemberSubscription : MemberSubscription
         return false;
     }
 
-    static EventInfo GetEvent ( Type type, string eventName )
+    static EventInfo? GetEvent ( Type type, string eventName )
     {
         var t = type;
         while ( t != null && t != typeof(object) )
         {
             var ti = t.GetTypeInfo ( );
-            var ev = t.GetTypeInfo ( ).GetDeclaredEvent ( eventName );
+            var ev = ti.GetDeclaredEvent ( eventName );
             if ( ev != null ) return ev;
             t = ti.BaseType;
         }
@@ -131,28 +143,32 @@ public sealed class GenericEventMemberSubscription : MemberSubscription
 
         // TODO: Caching
         return lambda.Compile ( );
-
-        //var delegateInvokeInfo = lambda.Compile ( ).GetMethodInfo ( );
-        //return delegateInvokeInfo.CreateDelegate ( handlerType, null );
     }
 }
 
-public class MemberObserver : IMemberObserver
+public class MemberSubscriber : IMemberSubscriber
 {
-    private class MyClass
+    private readonly IMemberSubscriptionFactory factory;
+
+    public MemberSubscriber ( IMemberSubscriptionFactory factory )
+    {
+        this.factory = factory;
+    }
+
+    private class Entry
     {
         public MemberSubscription? Subscription;
         public Action<int>? Action;
     }
 
-    readonly Dictionary<Tuple<Object, MemberInfo>, MyClass> objectSubs =
-        new Dictionary<Tuple<Object, MemberInfo>, MyClass> ( );
+    readonly Dictionary<Tuple<Object, MemberInfo>, Entry> objectSubs =
+        new Dictionary<Tuple<Object, MemberInfo>, Entry> ( );
 
 
     private sealed class Token : IDisposable
     {
-        public MemberObserver me;
-        public MyClass MyClass;
+        public MemberSubscriber me;
+        public Entry MyClass;
         public Action<int> Callback;
 
         public void Dispose ( )
@@ -171,19 +187,18 @@ public class MemberObserver : IMemberObserver
         }
     }
 
-    public IDisposable? Observe ( object target, MemberInfo member, Action<int> k )
+    public IDisposable Subscribe ( object target, MemberInfo member, Action<int> k )
     {
         var key = Tuple.Create ( target, member );
-        MyClass subs;
+        Entry subs;
         if ( !objectSubs.TryGetValue ( key, out subs ) )
         {
-            subs = new MyClass ( );
+            subs = new Entry ( );
             objectSubs.Add ( key, subs );
         }
 
         if ( subs.Action == null )
-            subs.Subscription = target is INotifyPropertyChanged npc ? new NotifyPropertyChangedMemberSubscription ( npc, member, Callback ) :
-                new GenericEventMemberSubscription ( target, member, Callback );
+            subs.Subscription = factory.Create ( target, member, Callback );
 
         subs.Action += k;
 

@@ -16,7 +16,7 @@ public class Binder : IBinder
         return BindExpression ( specifications.Body );
     }
 
-    public IMemberObserver MemberObserver { get; } = new MemberObserver ( );
+    public IMemberSubscriber MemberSubscriber { get; } = new MemberSubscriber ( new MemberSubscriptionFactory ( ) );
     public IBindingScheduler BindingScheduler { get; } = new NoScheduler ( );
 
     IBinding BindExpression ( Expression expr )
@@ -50,7 +50,7 @@ public class Binder : IBinder
         if ( expr.NodeType == ExpressionType.Equal )
         {
             var b = (BinaryExpression) expr;
-            return new Binding ( MemberObserver, BindingScheduler, b.Left, b.Right );
+            return new Binding ( MemberSubscriber, BindingScheduler, b.Left, b.Right );
         }
 
         throw new NotSupportedException ( "Only equality bindings are supported." );
@@ -218,7 +218,7 @@ public static class DefaultBinder
             var m = (MemberExpression) body;
             var x = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( m.Expression );
             if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != SentinelPropogationVisitor.Sentinel )
-                factory.MemberObserver.Invalidate ( obj, m.Member, 0 );
+                factory.MemberSubscriber.Invalidate ( obj, m.Member, 0 );
         }
         else
             throw new NotSupportedException();
@@ -259,7 +259,7 @@ public sealed class Trigger
 // TODO: Cache or reuse rewritten expressions...
 public sealed class Binding : IBinding
 {
-    public IMemberObserver MemberObserver { get; }
+    public IMemberSubscriber MemberSubscriber { get; }
     public IBindingScheduler Scheduler { get; }
 
     object Value;
@@ -270,9 +270,9 @@ public sealed class Binding : IBinding
     readonly List<Trigger> leftTriggers;
     readonly List<Trigger> rightTriggers;
 
-    public Binding ( IMemberObserver observer, IBindingScheduler scheduler, Expression left, Expression right )
+    public Binding ( IMemberSubscriber observer, IBindingScheduler scheduler, Expression left, Expression right )
     {
-        MemberObserver = observer;
+        MemberSubscriber = observer;
         Scheduler = scheduler;
 
         this.left = left = new EnumerableToQueryableVisitor().Visit ( new EnumerableToCollectionVisitor ( right.Type ).Visit ( left ) );
@@ -369,7 +369,7 @@ public sealed class Binding : IBinding
         Value = value;
 
         if ( ! e )
-            MemberObserver.Invalidate ( expression, member, nextChangeId++ );
+            MemberSubscriber.Invalidate ( expression, member, nextChangeId++ );
     }
 
     public void Dispose ( )
@@ -424,7 +424,7 @@ public sealed class Binding : IBinding
         {
             Scheduler.Schedule ( t.Expression, target =>
             {
-                t.Subscription = MemberObserver.Observe ( target, t.Member, action );
+                t.Subscription = MemberSubscriber.Subscribe ( target, t.Member, action );
             } );
         }
     }
