@@ -92,16 +92,23 @@ public class EnumerableToCollectionVisitor : ExpressionVisitor
 
     public override Expression Visit ( Expression node )
     {
-        if ( node.Type == ReturnType )
+        if ( ! ReturnType.IsGenericType || ! node.Type.IsGenericType || node.Type == ReturnType )
             return node;
 
-        if ( node.Type.IsGenericType && node.Type.GetGenericTypeDefinition ( ) == typeof ( IEnumerable < > ) )
+        if ( node.Type.GetGenericTypeDefinition ( ) == typeof ( IEnumerable < > ) )
         {
-            if ( ReturnType.IsGenericType && typeof ( ICollection < > ).MakeGenericType ( ReturnType.GetGenericArguments ( ) [ 0 ] ).IsAssignableFrom ( ReturnType ) )
+            var elementType = ReturnType.GetGenericArguments ( ) [ 0 ];
+            if ( typeof ( ICollection         < > ).MakeGenericType ( elementType ).IsAssignableFrom ( ReturnType ) ||
+                 typeof ( IReadOnlyCollection < > ).MakeGenericType ( elementType ).IsAssignableFrom ( ReturnType ) )
             {
                 toListMethod ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.ToList ) );
 
-                var toList = toListMethod.MakeGenericMethod ( ReturnType, node.Type.GetGenericArguments ( ) [ 0 ] );
+                // TODO: Replace ObservableCollection with own collection
+                var collectionType = ReturnType;
+                if ( collectionType.IsInterface )
+                    collectionType = typeof ( System.Collections.ObjectModel.ObservableCollection < > ).MakeGenericType ( elementType );
+
+                var toList = toListMethod.MakeGenericMethod ( collectionType, node.Type.GetGenericArguments ( ) [ 0 ] );
 
                 return Expression.Call ( toList, node );
             }
