@@ -11,6 +11,9 @@ public interface IBinder
 
 public class Binder : IBinder
 {
+    // TODO: Lazy
+    public static Binder Default { get; set; } = new Binder ( );
+
     public IBinding Bind<T> ( Expression<Func<T>> specifications )
     {
         return BindExpression ( specifications.Body );
@@ -203,22 +206,32 @@ public class NoScheduler : IBindingScheduler
 
 public static class DefaultBinder
 {
-    private static readonly Binder factory = new Binder ( );
+    public static readonly Binder factory = new Binder ( );
 
     public static IBinding Bind<T> ( Expression<Func<T>> specifications )
     {
-        return factory.Bind ( specifications );
+        return Binder.Default.Bind ( specifications );
     }
 
     public static void Invalidate<T> ( Expression<Func<T>> lambdaExpr )
     {
-        var body = lambdaExpr.Body;
-        if ( body.NodeType == ExpressionType.MemberAccess )
+        Binder.Default.Invalidate ( lambdaExpr );
+    }
+
+    public static void Invalidate<T> ( this IBinder binder, Expression<Func<T>> lambdaExpr )
+    {
+        binder.Invalidate ( lambdaExpr.Body );
+    }
+
+    // TODO: Fix dependency access
+    public static void Invalidate ( this IBinder binder, Expression expression )
+    {
+        if ( expression.NodeType == ExpressionType.MemberAccess )
         {
-            var m = (MemberExpression) body;
+            var m = (MemberExpression) expression;
             var x = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( m.Expression );
             if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != SentinelPropogationVisitor.Sentinel )
-                factory.MemberSubscriber.Invalidate ( obj, m.Member, 0 );
+                ( (Binder) binder ).MemberSubscriber.Invalidate ( obj, m.Member, 0 );
         }
         else
             throw new NotSupportedException();
@@ -275,8 +288,16 @@ public sealed class Binding : IBinding
         MemberSubscriber = observer;
         Scheduler = scheduler;
 
-        this.left = left = new EnumerableToQueryableVisitor().Visit ( new EnumerableToCollectionVisitor ( right.Type ).Visit ( left ) );
-        this.right = right = new EnumerableToQueryableVisitor().Visit ( new EnumerableToCollectionVisitor ( left.Type ).Visit ( right ) );
+        left = new EnumerableToCollectionVisitor ( right.Type ).Visit ( left );
+        left = new EnumerableToQueryableVisitor  ( )           .Visit ( left );
+        left = new AggregateInvalidatorVisitor   ( )           .Visit ( left );
+
+        right = new EnumerableToCollectionVisitor ( left.Type ).Visit ( right );
+        right = new EnumerableToQueryableVisitor  ( )          .Visit ( right );
+        right = new AggregateInvalidatorVisitor   ( )          .Visit ( right );
+
+        this.left  = left;
+        this.right = right;
 
         leftTriggers = Trigger.ExtractTriggers ( left );
         rightTriggers = Trigger.ExtractTriggers ( right );

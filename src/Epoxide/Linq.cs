@@ -7,47 +7,94 @@ using System.Reflection;
 
 namespace Epoxide.Linq
 {
+    public class BindableQueryExecutedEventArgs : EventArgs
+    {
+        public BindableQueryExecutedEventArgs ( Expression expression )
+        {
+            Expression = expression;
+        }
+
+        public Expression Expression { get; }
+    }
+
     public abstract class BindableQuery
     {
-        internal abstract Expression Expression { get; }
-        internal abstract IEnumerable? Enumerable { get; }
+        public event EventHandler < BindableQueryExecutedEventArgs >? Executed;
 
-        internal BindableQuery() { }
+        public abstract IBinder      Binder     { get; }
+        public abstract Expression   Expression { get; }
+        public abstract IEnumerable? Enumerable { get; }
 
-        internal static IQueryable Create(Type elementType, IEnumerable sequence)
+        protected BindableQuery() { }
+
+        protected static IQueryable Create(Type elementType, IEnumerable sequence)
         {
             Type seqType = typeof(BindableQuery<>).MakeGenericType(elementType);
             return (IQueryable)Activator.CreateInstance(seqType, sequence)!;
         }
 
-        internal static IQueryable Create(Type elementType, Expression expression)
+        protected static IQueryable Create(Type elementType, Expression expression)
         {
             Type seqType = typeof(BindableQuery<>).MakeGenericType(elementType);
             return (IQueryable)Activator.CreateInstance(seqType, expression)!;
         }
+
+        protected static BindableQuery GetRootQuery ( Expression expression )
+        {
+            while ( expression is MethodCallExpression m )
+                expression = m.Object ?? m.Arguments [ 0 ];
+
+            if ( expression is ConstantExpression c && c.Value is BindableQuery root )
+                return root;
+
+            throw new InvalidOperationException ( "BindableQuery root not found" );
+        }
+
+        protected void OnExecuted ( Expression expression )
+        {
+            Executed?.Invoke ( this, new BindableQueryExecutedEventArgs ( expression ) );
+
+            var root = GetRootQuery ( expression );
+            if ( root != this )
+                root.Executed?.Invoke ( root, new BindableQueryExecutedEventArgs ( expression ) );
+        }
     }
 
-    public class BindableQuery<T> : BindableQuery, IOrderedQueryable<T>, IQueryProvider
+    public interface IBindableQueryable : IQueryable
     {
+        public event EventHandler < BindableQueryExecutedEventArgs >? Executed;
+    }
+
+    public interface IBindableQueryable < out T > : IQueryable < T >, IBindableQueryable
+    {
+        
+    }
+
+    public class BindableQuery<T> : BindableQuery, IOrderedQueryable<T>,IBindableQueryable < T >, IQueryProvider
+    {
+        private readonly IBinder _binder;
         private readonly Expression _expression;
         private IEnumerable<T>? _enumerable;
 
         IQueryProvider IQueryable.Provider => this;
 
-        public BindableQuery(IEnumerable<T> enumerable)
+        public BindableQuery(IBinder binder, IEnumerable<T> enumerable)
         {
+            _binder     = binder;
             _enumerable = enumerable;
             _expression = Expression.Constant(this);
         }
 
-        public BindableQuery(Expression expression)
+        private BindableQuery(Expression expression)
         {
             _expression = expression;
         }
 
-        internal override Expression Expression => _expression;
+        public override IBinder Binder => _binder ?? GetRootQuery ( _expression ).Binder ?? throw new InvalidOperationException ( "BindableQuery binder not found" );
 
-        internal override IEnumerable? Enumerable => _enumerable;
+        public override Expression Expression => _expression;
+
+        public override IEnumerable? Enumerable => _enumerable;
 
         Expression IQueryable.Expression => _expression;
 
@@ -78,7 +125,12 @@ namespace Epoxide.Linq
         {
             if (expression == null)
                 throw Error.ArgumentNull(nameof(expression));
-            return BindableQueryExecutor.Create(expression).ExecuteBoxed();
+
+            var result = BindableQueryExecutor.Create(expression).ExecuteBoxed();
+
+            OnExecuted ( expression );
+
+            return result;
         }
 
         TElement IQueryProvider.Execute<TElement>(Expression expression)
@@ -87,7 +139,12 @@ namespace Epoxide.Linq
                 throw Error.ArgumentNull(nameof(expression));
             if (!typeof(TElement).IsAssignableFrom(expression.Type))
                 throw Error.ArgumentNotValid(nameof(expression));
-            return new BindableQueryExecutor<TElement>(expression).Execute();
+
+            var result = new BindableQueryExecutor<TElement>(expression).Execute();
+
+            OnExecuted ( expression );
+
+            return result;
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
@@ -96,6 +153,7 @@ namespace Epoxide.Linq
 
         private IEnumerator<T> GetEnumerator()
         {
+            // TODO: Implement hook to here
             if (_enumerable == null)
             {
                 EnumerableRewriter rewriter = new EnumerableRewriter();
@@ -105,6 +163,8 @@ namespace Epoxide.Linq
                 if (enumerable == this)
                     throw Error.EnumeratingNullEnumerableExpression();
                 _enumerable = enumerable;
+
+                OnExecuted ( _expression );
             }
             return _enumerable.GetEnumerator();
         }
@@ -147,6 +207,7 @@ namespace Epoxide.Linq
 
         internal T Execute()
         {
+            // TODO: Implement hook to here
             EnumerableRewriter rewriter = new EnumerableRewriter();
             Expression body = rewriter.Visit(_expression);
             Expression<Func<object?, T>> f = Expression.Lambda<Func<object?, T>>(body, CachedExpressionCompiler.UnusedParameter);

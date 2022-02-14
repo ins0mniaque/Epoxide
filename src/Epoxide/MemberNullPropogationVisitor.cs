@@ -178,8 +178,13 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
         var argumentTypes    = GetEnumerableMethodArgumentTypes ( method );
         var queryableMethod  = queryableMethods [ method.Name ].FirstOrDefault ( q => q.GenericTypeCount == genericTypeCount &&
                                                                                       q.ArgumentTypes.SequenceEqual ( argumentTypes ) );
+        if ( queryableMethod == null )
+            return null;
 
-        return queryableMethod?.Method.MakeGenericMethod ( method.GetGenericArguments ( ) );
+        if ( queryableMethod.Method.IsGenericMethod )
+            return queryableMethod.Method.MakeGenericMethod ( method.GetGenericArguments ( ) );
+
+        return queryableMethod.Method;
     }
 
     private static Type [ ] GetEnumerableMethodArgumentTypes ( MethodInfo method )
@@ -198,5 +203,25 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
                      .Select        ( parameter => parameter.ParameterType )
                      .Select        ( type      => type.IsGenericType && type.GetGenericArguments ( ) [ 0 ] is { } a && a.IsGenericType ? a.GetGenericTypeDefinition ( ) : type )
                      .ToArray       ( );
+    }
+}
+
+public class AggregateInvalidatorVisitor : ExpressionVisitor
+{
+    private static MethodInfo? invalidates;
+
+    protected override Expression VisitMethodCall ( MethodCallExpression node )
+    {
+        if ( node.Method.DeclaringType == typeof ( BindableEnumerable ) && node.Method.Name == nameof ( BindableEnumerable.AsBindable ) )
+        {
+            invalidates ??= typeof ( BindableQueryable ).GetMethod ( nameof ( BindableQueryable.Invalidates ) );
+
+            return Expression.Call ( invalidates.MakeGenericMethod ( node.Method.GetGenericArguments ( ) ), node, Expression.Constant ( node.Arguments [ 0 ] ) );
+        }
+
+        if ( node.Method.DeclaringType != typeof ( Queryable ) || ExprHelper.GetGenericInterfaceArguments ( node.Method.ReturnType, typeof ( IQueryable < > ) ) != null )
+            return node;
+
+        return base.VisitMethodCall ( node );
     }
 }

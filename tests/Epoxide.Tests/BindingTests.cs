@@ -132,6 +132,29 @@ public class BindingTests
     }
 
     [ Fact ]
+    public void Aggregate ( )
+    {
+        var left  = -1;
+        var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
+
+        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i != 42 ).Select ( i => i + 50 ).Sum ( ) );
+
+        Assert.Equal ( 0, left );
+
+        right.Add ( 42 );
+
+        Assert.Equal ( 0, left );
+
+        right.Add ( 10 );
+
+        Assert.Equal ( 60, left );
+
+        right.Add ( 20 );
+
+        Assert.Equal ( 130, left );
+    }
+
+    [ Fact ]
     public void Collection ( )
     {
         var left  = (IReadOnlyCollection<string>?) null;
