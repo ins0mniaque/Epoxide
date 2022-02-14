@@ -101,7 +101,7 @@ public class EnumerableToCollectionVisitor : ExpressionVisitor
             if ( typeof ( ICollection         < > ).MakeGenericType ( elementType ).IsAssignableFrom ( ReturnType ) ||
                  typeof ( IReadOnlyCollection < > ).MakeGenericType ( elementType ).IsAssignableFrom ( ReturnType ) )
             {
-                toListMethod ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.ToList ) );
+                toListMethod ??= new Func<IEnumerable<object>, List<object>>(BindableEnumerable.ToList<List<object>, object>).GetMethodInfo().GetGenericMethodDefinition();
 
                 // TODO: Replace ObservableCollection with own collection
                 var collectionType = ReturnType;
@@ -118,15 +118,15 @@ public class EnumerableToCollectionVisitor : ExpressionVisitor
     }
 }
 
-public class EnumerableToQueryableVisitor : ExpressionVisitor
+public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
 {
     private static MethodInfo? asBindableMethod;
 
     protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
-        if ( node.Method.DeclaringType == typeof ( Enumerable ) || node.Method.DeclaringType == typeof ( BindableEnumerable ) )
+        if ( node.Method.DeclaringType == typeof ( Enumerable ) )
         {
-            var queryableMethod = FindQueryableMethod ( node.Method );
+            var queryableMethod = FindBindableEnumerableMethod ( node.Method );
             if ( queryableMethod == null )
                 return base.VisitMethodCall ( node );
 
@@ -136,7 +136,7 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
 
             var asBindable = asBindableMethod.MakeGenericMethod ( arg0.Type.GetGenericArguments ( ) [ 0 ] );
 
-            arg0 = typeof ( IQueryable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0 );
+            arg0 = typeof ( IBindableEnumerable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0 );
 
             var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Lambda ( a ) : a );
 
@@ -146,13 +146,13 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
         return base.VisitMethodCall ( node );
     }
 
-    private class QueryableMethod
+    private class BindableEnumerableMethod
     {
-        public QueryableMethod ( MethodInfo method )
+        public BindableEnumerableMethod ( MethodInfo method )
         {
             Method           = method;
             GenericTypeCount = method.GetGenericArguments ( ).Length;
-            ArgumentTypes    = GetQueryableMethodArgumentTypes ( method );
+            ArgumentTypes    = GetBindableEnumerableMethodArgumentTypes ( method );
         }
 
         public MethodInfo Method           { get; }
@@ -160,38 +160,29 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
         public Type [ ]   ArgumentTypes    { get; }
     }
 
-    private static ILookup < string, QueryableMethod >? queryableMethods;
-    private static HashSet < string >?                  enumerableMethodsWithoutEquivalents;
+    private static ILookup < string, BindableEnumerableMethod >? bindableEnumerableMethods;
 
-    private static MethodInfo? FindQueryableMethod(MethodInfo method)
+    private static MethodInfo? FindBindableEnumerableMethod(MethodInfo method)
     {
         const BindingFlags Extensions = BindingFlags.Static | BindingFlags.Public;
 
-        queryableMethods ??= typeof ( BindableQueryable ).GetMethods ( Extensions )
-            .Concat ( typeof ( Queryable ).GetMethods ( Extensions ) )
-            .Select ( m => new QueryableMethod ( m ) )
+        bindableEnumerableMethods ??= typeof ( BindableEnumerable ).GetMethods ( Extensions )
+            .Select ( m => new BindableEnumerableMethod ( m ) )
             .ToLookup ( q => q.Method.Name );
-
-        enumerableMethodsWithoutEquivalents ??= typeof ( BindableEnumerable ).GetMethods ( Extensions )
-            .Concat ( typeof ( Enumerable ).GetMethods ( Extensions ) )
-            .Select ( m => m.Name )
-            .Except ( queryableMethods.Select ( q => q.Key ) )
-            .ToHashSet ( );
-
-        if ( enumerableMethodsWithoutEquivalents.Contains ( method.Name ) )
-            return null;
 
         var genericTypeCount = method.GetGenericArguments ( ).Length;
         var argumentTypes    = GetEnumerableMethodArgumentTypes ( method );
-        var queryableMethod  = queryableMethods [ method.Name ].FirstOrDefault ( q => q.GenericTypeCount == genericTypeCount &&
-                                                                                      q.ArgumentTypes.SequenceEqual ( argumentTypes ) );
-        if ( queryableMethod == null )
-            return null;
 
-        if ( queryableMethod.Method.IsGenericMethod )
-            return queryableMethod.Method.MakeGenericMethod ( method.GetGenericArguments ( ) );
+        var bindableEnumerableMethod = bindableEnumerableMethods [ method.Name ].FirstOrDefault ( q => ( q.Method.ReturnType.IsGenericType || q.Method.ReturnType == method.ReturnType ) &&
+                                                                                                       q.GenericTypeCount == genericTypeCount &&
+                                                                                                       q.ArgumentTypes.SequenceEqual ( argumentTypes ) );
+        if ( bindableEnumerableMethod == null )
+            throw new InvalidOperationException($"Missing {nameof(BindableEnumerable)} equivalent for {method.DeclaringType.Name}.{method.Name}");
 
-        return queryableMethod.Method;
+        if ( bindableEnumerableMethod.Method.IsGenericMethod )
+            return bindableEnumerableMethod.Method.MakeGenericMethod ( method.GetGenericArguments ( ) );
+
+        return bindableEnumerableMethod.Method;
     }
 
     private static Type [ ] GetEnumerableMethodArgumentTypes ( MethodInfo method )
@@ -203,7 +194,7 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
                      .ToArray       ( );
     }
 
-    private static Type [ ] GetQueryableMethodArgumentTypes ( MethodInfo method )
+    private static Type [ ] GetBindableEnumerableMethodArgumentTypes ( MethodInfo method )
     {
         return method.GetParameters ( )
                      .Skip          ( 1 )
@@ -221,12 +212,12 @@ public class AggregateInvalidatorVisitor : ExpressionVisitor
     {
         if ( node.Method.DeclaringType == typeof ( BindableEnumerable ) && node.Method.Name == nameof ( BindableEnumerable.AsBindable ) )
         {
-            invalidates ??= typeof ( BindableQueryable ).GetMethod ( nameof ( BindableQueryable.Invalidates ) );
+            invalidates ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.Invalidates ) );
 
             return Expression.Call ( invalidates.MakeGenericMethod ( node.Method.GetGenericArguments ( ) ), node, Expression.Constant ( node.Arguments [ 0 ] ) );
         }
 
-        if ( node.Method.DeclaringType != typeof ( Queryable ) || ExprHelper.GetGenericInterfaceArguments ( node.Method.ReturnType, typeof ( IQueryable < > ) ) != null )
+        if ( node.Method.DeclaringType != typeof ( BindableEnumerable ) || ExprHelper.GetGenericInterfaceArguments ( node.Method.ReturnType, typeof ( IBindableEnumerable < > ) ) != null )
             return node;
 
         return base.VisitMethodCall ( node );

@@ -289,11 +289,11 @@ public sealed class Binding : IBinding
         Scheduler = scheduler;
 
         left = new EnumerableToCollectionVisitor ( right.Type ).Visit ( left );
-        left = new EnumerableToQueryableVisitor  ( )           .Visit ( left );
+        left = new EnumerableToBindableEnumerableVisitor  ( )           .Visit ( left );
         left = new AggregateInvalidatorVisitor   ( )           .Visit ( left );
 
         right = new EnumerableToCollectionVisitor ( left.Type ).Visit ( right );
-        right = new EnumerableToQueryableVisitor  ( )          .Visit ( right );
+        right = new EnumerableToBindableEnumerableVisitor  ( )          .Visit ( right );
         right = new AggregateInvalidatorVisitor   ( )          .Visit ( right );
 
         this.left  = left;

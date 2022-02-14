@@ -7,213 +7,7 @@ using System.Reflection;
 
 namespace Epoxide.Linq
 {
-    public class BindableQueryExecutedEventArgs : EventArgs
-    {
-        public BindableQueryExecutedEventArgs ( Expression expression )
-        {
-            Expression = expression;
-        }
-
-        public Expression Expression { get; }
-    }
-
-    public abstract class BindableQuery
-    {
-        public event EventHandler < BindableQueryExecutedEventArgs >? Executed;
-
-        public abstract IBinder      Binder     { get; }
-        public abstract Expression   Expression { get; }
-        public abstract IEnumerable? Enumerable { get; }
-
-        protected BindableQuery() { }
-
-        protected static IQueryable Create(Type elementType, IEnumerable sequence)
-        {
-            Type seqType = typeof(BindableQuery<>).MakeGenericType(elementType);
-            return (IQueryable)Activator.CreateInstance(seqType, sequence)!;
-        }
-
-        protected static IQueryable Create(Type elementType, Expression expression)
-        {
-            Type seqType = typeof(BindableQuery<>).MakeGenericType(elementType);
-            return (IQueryable)Activator.CreateInstance(seqType, expression)!;
-        }
-
-        protected static BindableQuery GetRootQuery ( Expression expression )
-        {
-            while ( expression is MethodCallExpression m )
-                expression = m.Object ?? m.Arguments [ 0 ];
-
-            if ( expression is ConstantExpression c && c.Value is BindableQuery root )
-                return root;
-
-            throw new InvalidOperationException ( "BindableQuery root not found" );
-        }
-
-        protected void OnExecuted ( Expression expression )
-        {
-            Executed?.Invoke ( this, new BindableQueryExecutedEventArgs ( expression ) );
-
-            var root = GetRootQuery ( expression );
-            if ( root != this )
-                root.Executed?.Invoke ( root, new BindableQueryExecutedEventArgs ( expression ) );
-        }
-    }
-
-    public interface IBindableQueryable : IQueryable
-    {
-        public event EventHandler < BindableQueryExecutedEventArgs >? Executed;
-    }
-
-    public interface IBindableQueryable < out T > : IQueryable < T >, IBindableQueryable
-    {
-        
-    }
-
-    public class BindableQuery<T> : BindableQuery, IOrderedQueryable<T>,IBindableQueryable < T >, IQueryProvider
-    {
-        private readonly IBinder _binder;
-        private readonly Expression _expression;
-        private IEnumerable<T>? _enumerable;
-
-        IQueryProvider IQueryable.Provider => this;
-
-        public BindableQuery(IBinder binder, IEnumerable<T> enumerable)
-        {
-            _binder     = binder;
-            _enumerable = enumerable;
-            _expression = Expression.Constant(this);
-        }
-
-        private BindableQuery(Expression expression)
-        {
-            _expression = expression;
-        }
-
-        public override IBinder Binder => _binder ?? GetRootQuery ( _expression ).Binder ?? throw new InvalidOperationException ( "BindableQuery binder not found" );
-
-        public override Expression Expression => _expression;
-
-        public override IEnumerable? Enumerable => _enumerable;
-
-        Expression IQueryable.Expression => _expression;
-
-        Type IQueryable.ElementType => typeof(T);
-
-        IQueryable IQueryProvider.CreateQuery(Expression expression)
-        {
-            if (expression == null)
-                throw Error.ArgumentNull(nameof(expression));
-            Type? iqType = TypeHelper.FindGenericType(typeof(IQueryable<>), expression.Type);
-            if (iqType == null)
-                throw Error.ArgumentNotValid(nameof(expression));
-            return Create(iqType.GetGenericArguments()[0], expression);
-        }
-
-        IQueryable<TElement> IQueryProvider.CreateQuery<TElement>(Expression expression)
-        {
-            if (expression == null)
-                throw Error.ArgumentNull(nameof(expression));
-            if (!typeof(IQueryable<TElement>).IsAssignableFrom(expression.Type))
-            {
-                throw Error.ArgumentNotValid(nameof(expression));
-            }
-            return new BindableQuery<TElement>(expression);
-        }
-
-        object? IQueryProvider.Execute(Expression expression)
-        {
-            if (expression == null)
-                throw Error.ArgumentNull(nameof(expression));
-
-            var result = BindableQueryExecutor.Create(expression).ExecuteBoxed();
-
-            OnExecuted ( expression );
-
-            return result;
-        }
-
-        TElement IQueryProvider.Execute<TElement>(Expression expression)
-        {
-            if (expression == null)
-                throw Error.ArgumentNull(nameof(expression));
-            if (!typeof(TElement).IsAssignableFrom(expression.Type))
-                throw Error.ArgumentNotValid(nameof(expression));
-
-            var result = new BindableQueryExecutor<TElement>(expression).Execute();
-
-            OnExecuted ( expression );
-
-            return result;
-        }
-
-        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-
-        IEnumerator<T> IEnumerable<T>.GetEnumerator() => GetEnumerator();
-
-        private IEnumerator<T> GetEnumerator()
-        {
-            if (_enumerable == null)
-            {
-                EnumerableRewriter rewriter = new EnumerableRewriter();
-                Expression body = rewriter.Visit(_expression);
-                Expression<Func<object?, IEnumerable<T>>> f = Expression.Lambda<Func<object?, IEnumerable<T>>>(body, CachedExpressionCompiler.UnusedParameter);
-                IEnumerable<T> enumerable = CachedExpressionCompiler.Compile(f)(null);
-                if (enumerable == this)
-                    throw Error.EnumeratingNullEnumerableExpression();
-                _enumerable = enumerable;
-
-                OnExecuted ( _expression );
-            }
-            return _enumerable.GetEnumerator();
-        }
-
-        public override string? ToString()
-        {
-            if (_expression is ConstantExpression c && c.Value == this)
-            {
-                if (_enumerable != null)
-                    return _enumerable.ToString();
-                return "null";
-            }
-            return _expression.ToString();
-        }
-    }
-
-    public abstract class BindableQueryExecutor
-    {
-        internal abstract object? ExecuteBoxed();
-
-        internal BindableQueryExecutor() { }
-
-        internal static BindableQueryExecutor Create(Expression expression)
-        {
-            Type execType = typeof(BindableQueryExecutor<>).MakeGenericType(expression.Type);
-            return (BindableQueryExecutor)Activator.CreateInstance(execType, expression)!;
-        }
-    }
-
-    public class BindableQueryExecutor<T> : BindableQueryExecutor
-    {
-        private readonly Expression _expression;
-
-        public BindableQueryExecutor(Expression expression)
-        {
-            _expression = expression;
-        }
-
-        internal override object? ExecuteBoxed() => Execute();
-
-        internal T Execute()
-        {
-            EnumerableRewriter rewriter = new EnumerableRewriter();
-            Expression body = rewriter.Visit(_expression);
-            Expression<Func<object?, T>> f = Expression.Lambda<Func<object?, T>>(body, CachedExpressionCompiler.UnusedParameter);
-            Func<object?, T> func = CachedExpressionCompiler.Compile(f);
-            return func(null);
-        }
-    }
-
+    // TODO: Fix EnumerableToBindableEnumerableVisitor using this
     internal sealed class EnumerableRewriter : ExpressionVisitor
     {
         // We must ensure that if a LabelTarget is rewritten that it is always rewritten to the same new target
@@ -225,8 +19,6 @@ namespace Epoxide.Linq
         public EnumerableRewriter()
         {
         }
-
-        private static MethodInfo? asBindableMethod;
 
         protected override Expression VisitMethodCall(MethodCallExpression m)
         {
@@ -251,17 +43,8 @@ namespace Epoxide.Linq
                     MethodInfo seqMethod = FindEnumerableMethodForQueryable(mInfo.Name, args, typeArgs);
                     args = FixupQuotedArgs(seqMethod, args);
 
-                    if ( args [ 0 ].NodeType != ExpressionType.Call )
-                    {
-                        asBindableMethod ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.AsBindable ) );
-
-                        var asBindable = asBindableMethod.MakeGenericMethod ( m.Type.GetGenericArguments ( ) [ 0 ] );
-
-                        args = args.Skip       ( 1 )
-                                   .Prepend    ( Expression.Call(obj, asBindable, args[0]) )
-                                   .ToList     ( )
-                                   .AsReadOnly ( );
-                    }
+                    if(args [ 0 ].NodeType != ExpressionType.Call)
+                        args = AddAsBindable(m.Type, args);
 
                     return Expression.Call(obj, seqMethod, args);
                 }
@@ -274,6 +57,20 @@ namespace Epoxide.Linq
                 }
             }
             return m;
+        }
+
+        private static MethodInfo? asBindableMethod;
+
+        private ReadOnlyCollection<Expression> AddAsBindable(Type enumerableType, ReadOnlyCollection<Expression> argList)
+        {
+            asBindableMethod ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.AsBindable ) );
+
+            var asBindable = asBindableMethod.MakeGenericMethod ( enumerableType.GetGenericArguments ( ) [ 0 ] );
+
+            return argList.Skip       ( 1 )
+                          .Prepend    ( Expression.Call(null, asBindable, argList[0]) )
+                          .ToList     ( )
+                          .AsReadOnly ( );
         }
 
         private ReadOnlyCollection<Expression> FixupQuotedArgs(MethodInfo mi, ReadOnlyCollection<Expression> argList)
@@ -434,22 +231,6 @@ namespace Epoxide.Linq
             return equiv;
         }
 
-        protected override Expression VisitConstant(ConstantExpression c)
-        {
-            if (c.Value is BindableQuery sq)
-            {
-                if (sq.Enumerable != null)
-                {
-                    Type t = GetPublicType(sq.Enumerable.GetType());
-                    return Expression.Constant(sq.Enumerable, t);
-                }
-                Expression exp = sq.Expression;
-                if (exp != c)
-                    return Visit(exp);
-            }
-            return c;
-        }
-
         private static ILookup<string, MethodInfo>? s_seqMethods;
         private static MethodInfo FindEnumerableMethodForQueryable(string name, ReadOnlyCollection<Expression> args, params Type[]? typeArgs)
         {
@@ -583,7 +364,7 @@ namespace Epoxide.Linq
                 return base.VisitGoto(node);
             LabelTarget target = VisitLabelTarget(node.Target);
             Expression value = Visit(node.Value);
-            return Expression.MakeGoto(node.Kind, target, value, GetEquivalentType(typeof(BindableQuery).IsAssignableFrom(type) ? value.Type : type));
+            return Expression.MakeGoto(node.Kind, target, value, GetEquivalentType(typeof(IBindableEnumerable).IsAssignableFrom(type) ? value.Type : type));
         }
 
         protected override LabelTarget VisitLabelTarget(LabelTarget? node)
