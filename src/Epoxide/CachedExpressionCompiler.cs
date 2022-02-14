@@ -12,11 +12,11 @@ namespace Epoxide
     // The unit tests for the ExpressionUtil.* types are in the System.Web.Mvc.Test project.
     public static class CachedExpressionCompiler
     {
-        private static readonly ParameterExpression _unusedParameterExpr = Expression.Parameter(typeof(object), "_unused");
+        public static ParameterExpression UnusedParameter { get; } = Expression.Parameter(typeof(object), "_");
 
         // Implements caching around LambdaExpression.Compile() so that equivalent expression trees only have to be
         // compiled once.
-        public static Func<TModel, TValue> Compile<TModel, TValue>(this Expression<Func<TModel, TValue>> lambdaExpression)
+        public static Func<TModel, TValue> Compile<TModel, TValue>(Expression<Func<TModel, TValue>> lambdaExpression)
         {
             if (lambdaExpression == null)
                 throw new ArgumentNullException(nameof(lambdaExpression));
@@ -25,19 +25,13 @@ namespace Epoxide
         }
 
         // Evaluates an expression (not a LambdaExpression), e.g. 2 + 2.
-        public static object Evaluate(Expression arg)
+        public static object? Evaluate(Expression arg)
         {
             if (arg == null)
                 throw new ArgumentNullException(nameof(arg));
 
-            Func<object, object> func = Wrap(arg);
-            return func(null);
-        }
-
-        private static Func<object, object> Wrap(Expression arg)
-        {
-            Expression<Func<object, object>> lambdaExpr = Expression.Lambda<Func<object, object>>(Expression.Convert(arg, typeof(object)), _unusedParameterExpr);
-            return ExpressionUtil.CachedExpressionCompiler.Process(lambdaExpr);
+            var lambdaExpr = Expression.Lambda<Func<object?, object?>>(Expression.Convert(arg, typeof(object)), UnusedParameter);
+            return ExpressionUtil.CachedExpressionCompiler.Process(lambdaExpr)(null);
         }
     }
 }

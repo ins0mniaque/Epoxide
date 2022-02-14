@@ -100,8 +100,8 @@ namespace Epoxide.Linq
             {
                 EnumerableRewriter rewriter = new EnumerableRewriter();
                 Expression body = rewriter.Visit(_expression);
-                Expression<Func<IEnumerable<T>>> f = Expression.Lambda<Func<IEnumerable<T>>>(body, (IEnumerable<ParameterExpression>?)null);
-                IEnumerable<T> enumerable = f.Compile()(); // TODO: Caching
+                Expression<Func<object?, IEnumerable<T>>> f = Expression.Lambda<Func<object?, IEnumerable<T>>>(body, CachedExpressionCompiler.UnusedParameter);
+                IEnumerable<T> enumerable = CachedExpressionCompiler.Compile(f)(null);
                 if (enumerable == this)
                     throw Error.EnumeratingNullEnumerableExpression();
                 _enumerable = enumerable;
@@ -149,9 +149,9 @@ namespace Epoxide.Linq
         {
             EnumerableRewriter rewriter = new EnumerableRewriter();
             Expression body = rewriter.Visit(_expression);
-            Expression<Func<T>> f = Expression.Lambda<Func<T>>(body, (IEnumerable<ParameterExpression>?)null);
-            Func<T> func = f.Compile(); // TODO: Caching
-            return func();
+            Expression<Func<object?, T>> f = Expression.Lambda<Func<object?, T>>(body, CachedExpressionCompiler.UnusedParameter);
+            Func<object?, T> func = CachedExpressionCompiler.Compile(f);
+            return func(null);
         }
     }
 
