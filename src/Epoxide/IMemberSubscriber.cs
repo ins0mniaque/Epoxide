@@ -128,21 +128,25 @@ public sealed class GenericEventMemberSubscription : MemberSubscription
         return null;
     }
 
+    static Dictionary<EventInfo, Delegate> cache = new Dictionary<EventInfo, Delegate>();
     static Delegate CreateGenericEventHandler ( EventInfo evt, Action d )
     {
+        if ( cache.TryGetValue ( evt, out var handler ) )
+            return handler;
+
         var handlerType = evt.EventHandlerType;
         var handlerTypeInfo = handlerType.GetTypeInfo ( );
-        var handlerInvokeInfo = handlerTypeInfo.GetDeclaredMethod ( "Invoke" );
+        var handlerInvokeInfo = handlerTypeInfo.GetDeclaredMethod ( nameof ( Action.Invoke ) );
         var eventParams = handlerInvokeInfo.GetParameters ( );
 
-        //lambda: (object x0, EventArgs x1) => d()
         var parameters = eventParams.Select ( p => Expression.Parameter ( p.ParameterType, p.Name ) ).ToArray ( );
         var body = Expression.Call ( Expression.Constant ( d ),
-            d.GetType ( ).GetTypeInfo ( ).GetDeclaredMethod ( "Invoke" ) );
+            d.GetType ( ).GetTypeInfo ( ).GetDeclaredMethod ( nameof ( Action.Invoke ) ) );
         var lambda = Expression.Lambda ( body, parameters );
 
-        // TODO: Caching
-        return lambda.Compile ( );
+        cache [ evt ] = handler = lambda.Compile ( );
+
+        return handler;
     }
 }
 
