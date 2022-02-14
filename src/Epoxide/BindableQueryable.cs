@@ -49,6 +49,7 @@ public static class BindableEnumerable
             while ( root is MethodCallExpression m )
                 root = m.Object ?? m.Arguments [ 0 ];
 
+            // TODO: Listen to BindableQuery changes instead
             if ( root is ConstantExpression c && c.Value is BindableQuery q && q.Enumerable is INotifyCollectionChanged ncc )
             {
                 ncc.CollectionChanged += (o, e) =>
@@ -61,6 +62,30 @@ public static class BindableEnumerable
         }
 
         return output;
+    }
+
+    public static IEnumerable < TResult > Select < TSource, TResult > ( IEnumerable < TSource > source, Expression < Func < TSource, TResult > > selector )
+    {
+        var c = CachedExpressionCompiler.Compile ( selector );
+
+        return source.Select ( c );
+    }
+
+    public static IEnumerable < TSource > Where < TSource > ( IEnumerable < TSource > source, Expression < Func < TSource, bool > > predicate )
+    {
+        var c = CachedExpressionCompiler.Compile ( predicate );
+
+        if ( source is BindableQuery < TSource > bindable )
+        {
+            var binder = bindable.Binder;
+
+            // TODO: Subscribe to changes
+            //       Propagate change to next operator through BindableQuery
+
+            return source.Where ( c );
+        }
+
+        return source.Where ( c );
     }
 }
 

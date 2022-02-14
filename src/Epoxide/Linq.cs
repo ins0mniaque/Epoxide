@@ -153,7 +153,6 @@ namespace Epoxide.Linq
 
         private IEnumerator<T> GetEnumerator()
         {
-            // TODO: Implement hook to here
             if (_enumerable == null)
             {
                 EnumerableRewriter rewriter = new EnumerableRewriter();
@@ -207,7 +206,6 @@ namespace Epoxide.Linq
 
         internal T Execute()
         {
-            // TODO: Implement hook to here
             EnumerableRewriter rewriter = new EnumerableRewriter();
             Expression body = rewriter.Visit(_expression);
             Expression<Func<object?, T>> f = Expression.Lambda<Func<object?, T>>(body, CachedExpressionCompiler.UnusedParameter);
@@ -227,6 +225,8 @@ namespace Epoxide.Linq
         public EnumerableRewriter()
         {
         }
+
+        private static MethodInfo? asBindableMethod;
 
         protected override Expression VisitMethodCall(MethodCallExpression m)
         {
@@ -250,6 +250,19 @@ namespace Epoxide.Linq
                     // convert Queryable method to Enumerable method
                     MethodInfo seqMethod = FindEnumerableMethodForQueryable(mInfo.Name, args, typeArgs);
                     args = FixupQuotedArgs(seqMethod, args);
+
+                    if ( args [ 0 ].NodeType != ExpressionType.Call )
+                    {
+                        asBindableMethod ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.AsBindable ) );
+
+                        var asBindable = asBindableMethod.MakeGenericMethod ( m.Type.GetGenericArguments ( ) [ 0 ] );
+
+                        args = args.Skip       ( 1 )
+                                   .Prepend    ( Expression.Call(obj, asBindable, args[0]) )
+                                   .ToList     ( )
+                                   .AsReadOnly ( );
+                    }
+
                     return Expression.Call(obj, seqMethod, args);
                 }
                 else
@@ -442,7 +455,7 @@ namespace Epoxide.Linq
         {
             if (s_seqMethods == null)
             {
-                s_seqMethods = GetEnumerableStaticMethods(typeof(Enumerable)).ToLookup(m => m.Name);
+                s_seqMethods = GetEnumerableStaticMethods(typeof(BindableEnumerable)).Concat(GetEnumerableStaticMethods(typeof(Enumerable))).ToLookup(m => m.Name);
             }
             MethodInfo? mi = s_seqMethods[name].FirstOrDefault(m => ArgsMatch(m, args, typeArgs));
             Debug.Assert(mi != null, "All static methods with arguments on Queryable have equivalents on Enumerable.");

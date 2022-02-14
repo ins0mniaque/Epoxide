@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace Epoxide.Tests;
 
 public class BindingTests
@@ -174,6 +176,57 @@ public class BindingTests
 
         Assert.Single ( left );
         Assert.Equal  ( "42", left.First ( ) );
+    }
+
+    class NotifyTestObject : INotifyPropertyChanged
+    {
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        int state;
+
+        public int State
+        {
+            get { return state; }
+            set
+            {
+                if ( state != value )
+                {
+                    state = value;
+                    PropertyChanged?.Invoke ( this, new PropertyChangedEventArgs ( nameof ( State ) ) );
+                }
+            }
+        }
+    }
+
+    [ Fact ]
+    public void CollectionOfObservable ( )
+    {
+        var left  = (IReadOnlyCollection<string>?) null;
+        var right = new System.Collections.ObjectModel.ObservableCollection<NotifyTestObject> ();
+
+        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i.State != 0 ).Select ( i => i.State.ToString ( ) ) );
+
+        Assert.NotNull ( left );
+        Assert.Empty   ( left );
+
+        right.Add ( new NotifyTestObject { State = 42 } );
+
+        Assert.Single ( left );
+        Assert.Equal  ( "42", left.First ( ) );
+
+        right.Add ( new NotifyTestObject { State = 0 } );
+
+        Assert.Single ( left );
+        Assert.Equal  ( "42", left.First ( ) );
+
+        right [ 0 ].State = 0;
+
+        Assert.Empty ( left );
+
+        right [ 1 ].State = 33;
+
+        Assert.Single ( left );
+        Assert.Equal  ( "33", left.First ( ) );
     }
 
     [ Fact ]

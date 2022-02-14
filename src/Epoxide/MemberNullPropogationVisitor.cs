@@ -167,13 +167,13 @@ public class EnumerableToQueryableVisitor : ExpressionVisitor
     {
         const BindingFlags Extensions = BindingFlags.Static | BindingFlags.Public;
 
-        queryableMethods ??= typeof ( Queryable ).GetMethods ( Extensions )
-            .Concat ( typeof ( BindableQueryable ).GetMethods ( Extensions ) )
+        queryableMethods ??= typeof ( BindableQueryable ).GetMethods ( Extensions )
+            .Concat ( typeof ( Queryable ).GetMethods ( Extensions ) )
             .Select ( m => new QueryableMethod ( m ) )
             .ToLookup ( q => q.Method.Name );
 
-        enumerableMethodsWithoutEquivalents ??= typeof ( Enumerable ).GetMethods ( Extensions )
-            .Concat ( typeof ( BindableEnumerable ).GetMethods ( Extensions ) )
+        enumerableMethodsWithoutEquivalents ??= typeof ( BindableEnumerable ).GetMethods ( Extensions )
+            .Concat ( typeof ( Enumerable ).GetMethods ( Extensions ) )
             .Select ( m => m.Name )
             .Except ( queryableMethods.Select ( q => q.Key ) )
             .ToHashSet ( );
