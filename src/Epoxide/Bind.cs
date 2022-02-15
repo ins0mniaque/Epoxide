@@ -4,25 +4,50 @@ using System.Reflection;
 
 namespace Epoxide;
 
+public interface IBinderServices
+{
+    IMemberSubscriber     MemberSubscriber     { get; }
+    ICollectionSubscriber CollectionSubscriber { get; }
+    IBindingScheduler     Scheduler            { get; }
+}
+
+public class DefaultBindingServices : IBinderServices
+{
+    public IMemberSubscriber     MemberSubscriber     { get; } = new MemberSubscriber     ( new MemberSubscriptionFactory     ( ) );
+    public ICollectionSubscriber CollectionSubscriber { get; } = new CollectionSubscriber ( new CollectionSubscriptionFactory ( ) );
+    public IBindingScheduler     Scheduler            { get; } = new NoScheduler ( );
+}
+
 public interface IBinder
 {
+    IBinderServices Services { get; }
+
     IBinding Bind < T > ( Expression < Func < T > > specifications );
 }
 
 public class Binder : IBinder
 {
-    // TODO: Lazy
-    public static Binder Default { get; set; } = new Binder ( );
-
-    public IBinding Bind<T> ( Expression<Func<T>> specifications )
+    private static Binder? defaultBinder;
+    public  static Binder  Default
     {
-        return BindExpression ( specifications.Body );
+        get => defaultBinder ??= new Binder ( );
+        set => defaultBinder = value;
     }
 
-    public IMemberSubscriber MemberSubscriber { get; } = new MemberSubscriber ( new MemberSubscriptionFactory ( ) );
-    public IBindingScheduler BindingScheduler { get; } = new NoScheduler ( );
+    public Binder ( ) : this ( new DefaultBindingServices ( ) ) { }
+    public Binder ( IBinderServices services )
+    {
+        Services = services;
+    }
 
-    IBinding BindExpression ( Expression expr )
+    public IBinderServices Services { get; }
+
+    public IBinding Bind < T > ( Expression < Func < T > > specifications )
+    {
+        return Parse ( specifications.Body );
+    }
+
+    IBinding Parse ( Expression expr )
     {
         if ( expr.NodeType == ExpressionType.AndAlso )
         {
@@ -47,13 +72,13 @@ public class Binder : IBinder
 
             parts.Reverse ( );
 
-            return new CompositeBinding ( parts.Select ( BindExpression ) );
+            return new CompositeBinding ( parts.Select ( Parse ) );
         }
 
         if ( expr.NodeType == ExpressionType.Equal )
         {
             var b = (BinaryExpression) expr;
-            return new Binding ( MemberSubscriber, BindingScheduler, b.Left, b.Right );
+            return new Binding ( Services, b.Left, b.Right );
         }
 
         throw new NotSupportedException ( "Only equality bindings are supported." );
@@ -126,13 +151,19 @@ public delegate void MemberChangedCallback2 ( Expression expression, MemberInfo 
 
 public interface IBindingScheduler
 {
-    void Schedule ( Expression expr, Action < object > callback );
-    void ScheduleChange ( Expression expr, Expression valueExpression, MemberChangedCallback2 callback );
+    void Schedule ( Expression expr, Action callback );
+    void Read ( Expression expr, Action < object > callback );
+    void Write ( Expression expr, Expression valueExpression, MemberChangedCallback2 callback );
 }
 
 public class NoScheduler : IBindingScheduler
 {
-    public void Schedule ( Expression expr, Action < object > callback )
+    public void Schedule ( Expression expr, Action callback )
+    {
+        callback ( );
+    }
+
+    public void Read ( Expression expr, Action < object > callback )
     {
         var coalescing = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( expr );
         var value = CachedExpressionCompiler.Evaluate ( coalescing );
@@ -158,7 +189,7 @@ public class NoScheduler : IBindingScheduler
             callback ( value );
     }
 
-    public void ScheduleChange ( Expression expr, Expression valueExpression, MemberChangedCallback2 callback )
+    public void Write ( Expression expr, Expression valueExpression, MemberChangedCallback2 callback )
     {
         var coalescing = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( valueExpression );
         var value = CachedExpressionCompiler.Evaluate ( coalescing );
@@ -223,7 +254,6 @@ public static class DefaultBinder
         binder.Invalidate ( lambdaExpr.Body );
     }
 
-    // TODO: Fix dependency access
     public static void Invalidate ( this IBinder binder, Expression expression )
     {
         if ( expression.NodeType == ExpressionType.MemberAccess )
@@ -231,7 +261,7 @@ public static class DefaultBinder
             var m = (MemberExpression) expression;
             var x = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( m.Expression );
             if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != SentinelPropogationVisitor.Sentinel )
-                ( (Binder) binder ).MemberSubscriber.Invalidate ( obj, m.Member, 0 );
+                binder.Services.MemberSubscriber.Invalidate ( obj, m.Member, 0 );
         }
         else
             throw new NotSupportedException();
@@ -271,18 +301,14 @@ public sealed class Trigger
 
 public sealed class ExpressionSubscription : IDisposable
 {
-    public IMemberSubscriber MemberSubscriber { get; }
-    public IBindingScheduler Scheduler { get; }
-
+    readonly IBinderServices services;
     readonly Expression expression;
     readonly List<Trigger> triggers;
     readonly Action<object, MemberInfo, int> callback;
 
-    public ExpressionSubscription ( IMemberSubscriber observer, IBindingScheduler scheduler, Expression expression, Action<object, MemberInfo, int> callback )
+    public ExpressionSubscription ( IBinderServices services, Expression expression, Action<object, MemberInfo, int> callback )
     {
-        MemberSubscriber = observer;
-        Scheduler = scheduler;
-
+        this.services = services;
         this.expression = expression;
         this.callback = callback;
 
@@ -296,9 +322,9 @@ public sealed class ExpressionSubscription : IDisposable
             t.Subscription?.Dispose ( );
             t.Subscription = null;
 
-            Scheduler.Schedule ( t.Expression, target =>
+            services.Scheduler.Read ( t.Expression, target =>
             {
-                t.Subscription = MemberSubscriber.Subscribe ( target, t.Member, changeid => callback ( target, t.Member, changeid ) );
+                t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, changeid => callback ( target, t.Member, changeid ) );
             } );
         }
     }
@@ -318,10 +344,9 @@ public sealed class ExpressionSubscription : IDisposable
 // TODO: Cache or reuse rewritten expressions in scheduler
 public sealed class Binding : IBinding
 {
-    public IMemberSubscriber MemberSubscriber { get; }
-    public IBindingScheduler Scheduler { get; }
-
     object Value;
+
+    readonly IBinderServices services;
 
     readonly Expression left;
     readonly Expression right;
@@ -329,18 +354,17 @@ public sealed class Binding : IBinding
     readonly ExpressionSubscription leftSub;
     readonly ExpressionSubscription rightSub;
 
-    public Binding ( IMemberSubscriber observer, IBindingScheduler scheduler, Expression left, Expression right )
+    public Binding ( IBinderServices services, Expression left, Expression right )
     {
-        MemberSubscriber = observer;
-        Scheduler = scheduler;
+        this.services = services;
 
-        left = new EnumerableToCollectionVisitor ( right.Type ).Visit ( left );
-        left = new EnumerableToBindableEnumerableVisitor  ( )           .Visit ( left );
-        left = new AggregateInvalidatorVisitor   ( )           .Visit ( left );
+        left = new EnumerableToCollectionVisitor         ( right.Type ).Visit ( left );
+        left = new EnumerableToBindableEnumerableVisitor ( )           .Visit ( left );
+        left = new AggregateInvalidatorVisitor           ( )           .Visit ( left );
 
-        right = new EnumerableToCollectionVisitor ( left.Type ).Visit ( right );
-        right = new EnumerableToBindableEnumerableVisitor  ( )          .Visit ( right );
-        right = new AggregateInvalidatorVisitor   ( )          .Visit ( right );
+        right = new EnumerableToCollectionVisitor         ( left.Type ).Visit ( right );
+        right = new EnumerableToBindableEnumerableVisitor ( )          .Visit ( right );
+        right = new AggregateInvalidatorVisitor           ( )          .Visit ( right );
 
         this.left  = left;
         this.right = right;
@@ -350,15 +374,15 @@ public sealed class Binding : IBinding
 
         if ( ExprHelper.IsWritable ( left ) )
         {
-            Scheduler.ScheduleChange ( left, right, CallbackAndSubscribe );
+            services.Scheduler.Write ( left, right, CallbackAndSubscribe );
         }
-        else if (!ExprHelper.IsWritable(right) && ExprHelper.IsReadOnlyCollection(left) )
+        else if ( ! ExprHelper.IsWritable ( right ) && ExprHelper.IsReadOnlyCollection ( left ) )
         {
-            Scheduler.Schedule ( collectionExpression = left, SubscribeToCollection );
+            services.Scheduler.Read ( collectionExpression = left, SubscribeToCollection );
         }
         else
         {
-            Scheduler.ScheduleChange ( right, left, CallbackAndSubscribe );
+            services.Scheduler.Write ( right, left, CallbackAndSubscribe );
         }
     }
 
@@ -383,7 +407,7 @@ public sealed class Binding : IBinding
             return;
         }
 
-        Scheduler.Schedule ( right, rightValue =>
+        services.Scheduler.Read ( right, rightValue =>
         {
             collectionSubscription = BindCollections2 ( leftValue, rightValue );
 
@@ -392,41 +416,34 @@ public sealed class Binding : IBinding
         } );
     }
 
-    private static IDisposable? BindCollections2 ( object leftValue, object rightValue )
+    private IDisposable? BindCollections2 ( object leftValue, object rightValue )
     {
-        BindCollectionsMethod ??= typeof ( Binding ).GetMethod ( nameof ( BindCollections ), BindingFlags.NonPublic | BindingFlags.Static );
+        BindCollectionsMethod ??= typeof ( Binding ).GetMethod ( nameof ( BindCollections ), BindingFlags.NonPublic | BindingFlags.Instance );
 
-        // TODO: Add non-generic ICollection support
         var elementType = ExprHelper.GetGenericInterfaceArguments ( leftValue.GetType ( ), typeof ( ICollection < > ) )? [ 0 ];
         var bindCollections = BindCollectionsMethod.MakeGenericMethod ( elementType );
 
-        return (IDisposable?) bindCollections.Invoke ( null, new [ ] { leftValue, rightValue } );
+        return (IDisposable?) bindCollections.Invoke ( this, new [ ] { leftValue, rightValue } );
     }
 
     private static MethodInfo? BindCollectionsMethod;
 
-    private static IDisposable? BindCollections < T > ( ICollection < T > leftValue, IEnumerable < T >? rightValue )
+    private IDisposable? BindCollections < T > ( ICollection < T > leftValue, IEnumerable < T >? rightValue )
     {
         leftValue.Clear ( );
-        if ( rightValue != null )
-            foreach ( var item in rightValue )
-                leftValue.Add ( item );
-
-        if ( rightValue is INotifyCollectionChanged ncc )
-        {
-            ncc.CollectionChanged += (o, e) =>
-            {
-                leftValue.Clear ( );
-                if ( rightValue != null )
-                    foreach ( var item in rightValue )
-                        leftValue.Add ( item );
-            };
-
-            // TODO: Return disconnecting disposable
+        if ( rightValue == null )
             return null;
-        }
 
-        return null;
+        foreach ( var item in rightValue )
+            leftValue.Add ( item );
+
+        return services.CollectionSubscriber.Subscribe ( rightValue, (o, e) =>
+        {
+            leftValue.Clear ( );
+            if ( rightValue != null )
+                foreach ( var item in rightValue )
+                    leftValue.Add ( item );
+        } );
     }
 
     private void Callback ( Expression expression, MemberInfo member, object? value )
@@ -436,7 +453,7 @@ public sealed class Binding : IBinding
         Value = value;
 
         if ( ! e )
-            MemberSubscriber.Invalidate ( expression, member, nextChangeId++ );
+            services.MemberSubscriber.Invalidate ( expression, member, nextChangeId++ );
     }
 
     public void Dispose ( )
@@ -447,7 +464,7 @@ public sealed class Binding : IBinding
 
     ExpressionSubscription CreateSubscription ( Expression expr, Expression dependentExpr )
     {
-        return new ExpressionSubscription ( MemberSubscriber, Scheduler, expr, (o, m, changeId) => OnSideChanged ( expr, dependentExpr, changeId ) );
+        return new ExpressionSubscription ( services, expr, (o, m, changeId) => OnSideChanged ( expr, dependentExpr, changeId ) );
     }
 
     // TODO: Remove HashSet usages
@@ -463,13 +480,13 @@ public sealed class Binding : IBinding
             collectionSubscription?.Dispose ( );
             collectionSubscription = null;
 
-            Scheduler.Schedule ( collectionExpression, SubscribeToCollection );
+            services.Scheduler.Read ( collectionExpression, SubscribeToCollection );
             return;
         }
 
         var changeId = nextChangeId++;
         activeChangeIds.Add ( changeId );
-        Scheduler.ScheduleChange ( dependentExpr, expr, (e, m, a) =>
+        services.Scheduler.Write ( dependentExpr, expr, (e, m, a) =>
         {
             Callback (e, m, a);
             activeChangeIds.Remove ( changeId );

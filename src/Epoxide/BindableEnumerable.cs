@@ -34,7 +34,7 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
 {
     public event EventHandler < EventArgs >? Executed;
 
-    public abstract IBinder Binder { get; }
+    public abstract IBinder     Binder { get; }
     public abstract IEnumerable Source { get; }
 
 	public abstract void SetTarget < TElement > ( ICollection < TElement > collection );
@@ -44,6 +44,8 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
     {
 		Executed?.Invoke ( this, EventArgs.Empty );
     }
+
+	IEnumerable IBindableEnumerable.Source => Source;
 
     IOrderedEnumerable<T> IOrderedEnumerable<T>.CreateOrderedEnumerable<TKey> ( Func<T, TKey> keySelector, IComparer<TKey> comparer, bool descending )
     {
@@ -87,7 +89,7 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
 public class BindableEnumerable < T > : ExecutableEnumerable < T >
 {
 	private readonly IBinder _binder;
-	private IEnumerable<T>? _enumerable;
+	private IEnumerable<T> _enumerable;
 	private List<IBindableEnumerable> _chain = new List<IBindableEnumerable>();
 
     public BindableEnumerable(IBinder binder, IEnumerable<T> enumerable)
@@ -115,21 +117,21 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 		base.NotifyExecuted ( enumerable );
 	}
 
+	// TODO: Dispose of subscription properly
+    private IDisposable? subscription;
+
     public override void SetTarget < TElement > ( ICollection < TElement > collection )
     {
 		if ( _chain.Count == 0 || _chain [ ^1 ] is not IEnumerable<TElement> )
 			throw new InvalidOperationException ( "BindableEnumerable must be added to collection first" );
 
-		if ( Source is INotifyCollectionChanged ncc )
+		subscription?.Dispose ( );
+		subscription = Binder.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
         {
-            // TODO: Dispose properly in binder
-            ncc.CollectionChanged += (o, e) =>
-            {
-                collection.Clear ( );
-                foreach ( var item in (IEnumerable<TElement>) _chain [ ^1 ] )
-                    collection.Add ( item );
-            };
-        }
+			collection.Clear ( );
+			foreach ( var item in (IEnumerable<TElement>) _chain [ ^1 ] )
+				collection.Add ( item );
+        } );
     }
 
 	public override void SetTarget ( Expression expression )
@@ -140,11 +142,11 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
         {
             Executed -= Source_Executed;
 
-            if ( Source is INotifyCollectionChanged ncc )
-            {
-                // TODO: Dispose properly in binder
-                ncc.CollectionChanged += (o, e) => Binder.Invalidate ( expression );
-            }
+			subscription?.Dispose ( );
+			subscription = Binder.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
+			{
+				Binder.Invalidate ( expression );
+			} );
         }
     }
 

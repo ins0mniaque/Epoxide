@@ -5,21 +5,21 @@ namespace Epoxide;
 
 public interface ICollectionSubscriber
 {
-    IDisposable Subscribe < T > ( object collection, Action<CollectionChange<T>, int> k );
-    void Invalidate < T > ( object collection, int changeId = 0 );
+    IDisposable Subscribe < T > ( IEnumerable < T > collection, Action<CollectionChange<T>, int> k );
+    void Invalidate < T > ( IEnumerable < T > collection, int changeId = 0 );
 }
 
 public interface ICollectionSubscriptionFactory
 {
-    CollectionSubscription< T >? Create < T >( object collection, CollectionChangedCallback< T > callback );
+    CollectionSubscription< T >? Create < T >( IEnumerable < T > collection, CollectionChangedCallback< T > callback );
 }
 
 public class CollectionSubscriptionFactory : ICollectionSubscriptionFactory
 {
-    public CollectionSubscription< T >? Create< T > ( object collection, CollectionChangedCallback< T > callback )
+    public CollectionSubscription< T >? Create< T > ( IEnumerable < T > collection, CollectionChangedCallback< T > callback )
     {
-        return collection is INotifyCollectionChanged ncc ? new NotifyCollectionChangedCollectionSubscription< T > ( ncc, callback ) :
-                                                            null;
+        return collection is INotifyCollectionChanged ? new NotifyCollectionChangedCollectionSubscription< T > ( collection, callback ) :
+                                                        null;
     }
 }
 
@@ -111,17 +111,17 @@ public sealed class CollectionChange < T >
     public int  MovedFromIndex  { get; }
 }
 
-public delegate void CollectionChangedCallback < T > ( object collection, CollectionChange < T > change );
+public delegate void CollectionChangedCallback < T > ( IEnumerable < T > collection, CollectionChange < T > change );
 
 public abstract class CollectionSubscription < T > : IDisposable
 {
-    protected CollectionSubscription ( object collection, CollectionChangedCallback < T > callback )
+    protected CollectionSubscription ( IEnumerable < T > collection, CollectionChangedCallback < T > callback )
     {
-        Collection = Collection ?? throw new ArgumentNullException ( nameof ( collection ) );
+        Collection = collection ?? throw new ArgumentNullException ( nameof ( collection ) );
         Callback   = callback   ?? throw new ArgumentNullException ( nameof ( callback ) );
     }
 
-    public object Collection { get; }
+    public IEnumerable < T > Collection { get; }
 
     protected CollectionChangedCallback < T > Callback { get; }
 
@@ -130,9 +130,12 @@ public abstract class CollectionSubscription < T > : IDisposable
 
 public sealed class NotifyCollectionChangedCollectionSubscription < T > : CollectionSubscription < T >
 {
-    public NotifyCollectionChangedCollectionSubscription ( INotifyCollectionChanged collection, CollectionChangedCallback < T > callback ) : base ( collection, callback )
+    public NotifyCollectionChangedCollectionSubscription ( IEnumerable < T > collection, CollectionChangedCallback < T > callback ) : base ( collection, callback )
     {
-        collection.CollectionChanged += Collection_CollectionChanged;
+        if ( collection is not INotifyCollectionChanged ncc )
+            throw new ArgumentException ( "Collection must implement INotifyCollectionChanged", nameof ( collection ) );
+
+        ncc.CollectionChanged += Collection_CollectionChanged;
     }
 
     public override void Dispose ( )
@@ -143,8 +146,8 @@ public sealed class NotifyCollectionChangedCollectionSubscription < T > : Collec
     private void Collection_CollectionChanged ( object sender, NotifyCollectionChangedEventArgs e )
     {
         Callback ( Collection, ToCollectionChange ( e ) );
-        if ( e.Action == NotifyCollectionChangedAction.Reset && ((ICollection < T >) Collection).Count > 0)
-            Callback ( Collection, CollectionChange<T>.Added((ICollection < T >) Collection, 0));
+        if ( e.Action == NotifyCollectionChangedAction.Reset && ((IEnumerable < T >) Collection).Any ( ) )
+            Callback ( Collection, CollectionChange<T>.Added((IEnumerable < T >) Collection, 0));
     }
 
     // TODO: Handle null NewItems/OldItems
@@ -171,7 +174,7 @@ public class CollectionSubscriber : ICollectionSubscriber
     readonly Dictionary<Type, object> typedSubscribers =
         new Dictionary<Type, object> ( );
 
-    public IDisposable Subscribe < T > ( object collection, Action<CollectionChange<T>, int> k )
+    public IDisposable Subscribe < T > ( IEnumerable < T > collection, Action<CollectionChange<T>, int> k )
     {
         var key = typeof(T);
         var sub = (CollectionSubscriber<T>?) null;
@@ -186,7 +189,7 @@ public class CollectionSubscriber : ICollectionSubscriber
         return sub.Subscribe ( collection, k );
     }
 
-    public void Invalidate < T > ( object collection, int changeId = 0 )
+    public void Invalidate < T > ( IEnumerable < T > collection, int changeId = 0 )
     {
         var key = typeof(T);
         var sub = (CollectionSubscriber<T>?) null;
@@ -217,8 +220,8 @@ public class CollectionSubscriber < T >
         public Action<CollectionChange<T>, int>? Action;
     }
 
-    readonly Dictionary<Object, Entry> collectionSubs =
-        new Dictionary<Object, Entry> ( );
+    readonly Dictionary<IEnumerable < T >, Entry> collectionSubs =
+        new Dictionary<IEnumerable < T >, Entry> ( );
 
 
     private sealed class Token : IDisposable
@@ -243,7 +246,7 @@ public class CollectionSubscriber < T >
         }
     }
 
-    public IDisposable Subscribe ( object collection, Action<CollectionChange<T>, int> k )
+    public IDisposable Subscribe ( IEnumerable < T > collection, Action<CollectionChange<T>, int> k )
     {
         var key = collection;
         Entry subs;
@@ -261,18 +264,18 @@ public class CollectionSubscriber < T >
         return new Token { me = this, MyClass = subs, Callback = k };
     }
 
-    private void Callback ( object collection, CollectionChange<T> change )
+    private void Callback ( IEnumerable < T > collection, CollectionChange<T> change )
     {
         Invalidate ( collection, 0 );
     }
 
-    public void Invalidate ( object collection, int changeId = 0 )
+    public void Invalidate ( IEnumerable < T > collection, int changeId = 0 )
     {
         Notify ( collection, CollectionChange < T >.Cleared ( ), changeId );
-        Notify ( collection, CollectionChange < T >.Added   ( (ICollection < T >) collection, 0 ), changeId );
+        Notify ( collection, CollectionChange < T >.Added   ( (IEnumerable < T >) collection, 0 ), changeId );
     }
 
-    private void Notify ( object collection, CollectionChange< T > change, int changeId = 0 )
+    private void Notify ( IEnumerable < T > collection, CollectionChange< T > change, int changeId = 0 )
     {
         var key = collection;
         if ( collectionSubs.TryGetValue ( key, out var subs ) )
