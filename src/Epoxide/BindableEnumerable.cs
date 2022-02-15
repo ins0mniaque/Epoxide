@@ -10,8 +10,14 @@ public interface IBindableEnumerable : IEnumerable
 {
 	event EventHandler < EventArgs >? Executed;
 
-	IBinder Binder { get; }
+	IBinder     Binder { get; }
 	IEnumerable Source { get; }
+
+	// NOTE: Hide inside internal interface?
+	void NotifyExecuted ( IBindableEnumerable enumerable );
+
+	void SetTarget < TElement > ( ICollection < TElement > collection );
+	void SetTarget				( Expression			   expression );
 }
 
 public interface IBindableEnumerable < T > : IBindableEnumerable, IEnumerable < T >
@@ -30,6 +36,14 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
 
     public abstract IBinder Binder { get; }
     public abstract IEnumerable Source { get; }
+
+	public abstract void SetTarget < TElement > ( ICollection < TElement > collection );
+	public abstract void SetTarget				( Expression			   expression );
+
+	public virtual void NotifyExecuted ( IBindableEnumerable enumerable )
+    {
+		Executed?.Invoke ( this, EventArgs.Empty );
+    }
 
     IOrderedEnumerable<T> IOrderedEnumerable<T>.CreateOrderedEnumerable<TKey> ( Func<T, TKey> keySelector, IComparer<TKey> comparer, bool descending )
     {
@@ -65,8 +79,7 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
 		public void Dispose ( )
 		{
 			enumerator.Dispose ( );
-
-			enumerable.Executed?.Invoke ( enumerable, EventArgs.Empty );
+			enumerable.NotifyExecuted ( enumerable );
 		}
     }
 }
@@ -75,6 +88,7 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 {
 	private readonly IBinder _binder;
 	private IEnumerable<T>? _enumerable;
+	private List<IBindableEnumerable> _chain = new List<IBindableEnumerable>();
 
     public BindableEnumerable(IBinder binder, IEnumerable<T> enumerable)
     {
@@ -92,7 +106,49 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 
 	public override IEnumerable Source => _enumerable;
 
-	protected override IEnumerator<T> GetEnumerator() => _enumerable.GetEnumerator();
+	public override void NotifyExecuted ( IBindableEnumerable enumerable )
+	{
+		// TODO: Find a way to know the _chain is complete
+		if ( ! _chain.Contains ( enumerable ) )
+			_chain.Add ( enumerable );
+
+		base.NotifyExecuted ( enumerable );
+	}
+
+    public override void SetTarget < TElement > ( ICollection < TElement > collection )
+    {
+		if ( _chain.Count == 0 || _chain [ ^1 ] is not IEnumerable<TElement> )
+			throw new InvalidOperationException ( "BindableEnumerable must be added to collection first" );
+
+		if ( Source is INotifyCollectionChanged ncc )
+        {
+            // TODO: Dispose properly in binder
+            ncc.CollectionChanged += (o, e) =>
+            {
+                collection.Clear ( );
+                foreach ( var item in (IEnumerable<TElement>) _chain [ ^1 ] )
+                    collection.Add ( item );
+            };
+        }
+    }
+
+	public override void SetTarget ( Expression expression )
+    {
+		Executed += Source_Executed;
+
+		void Source_Executed ( object sender, EventArgs e )
+        {
+            Executed -= Source_Executed;
+
+            if ( Source is INotifyCollectionChanged ncc )
+            {
+                // TODO: Dispose properly in binder
+                ncc.CollectionChanged += (o, e) => Binder.Invalidate ( expression );
+            }
+        }
+    }
+
+    protected override IEnumerator<T> GetEnumerator() => _enumerable.GetEnumerator();
 }
 
 public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumerable < TResult >
@@ -106,7 +162,16 @@ public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumer
 
 	public override IEnumerable Source => Parent.Source;
 
-	protected IBindableEnumerable < TSource > Parent { get; }
+    public override void SetTarget < TElement > ( ICollection < TElement > collection ) => Parent.SetTarget ( collection );
+    public override void SetTarget              ( Expression			   expression ) => Parent.SetTarget ( expression );
+
+    protected IBindableEnumerable < TSource > Parent { get; }
+
+    public override void NotifyExecuted ( IBindableEnumerable enumerable )
+	{
+		Parent.NotifyExecuted ( enumerable );
+		base  .NotifyExecuted ( enumerable );
+	}
 }
 
 public class SelectBindableEnumerable < TSource, TResult > : BindableEnumerable < TSource, TResult >
@@ -159,49 +224,30 @@ public static class BindableEnumerable
         return new BindableEnumerable<TElement>(Binder.Default, source);
     }
 
+	// TODO: Remove extension and call directly in rewriter
 	public static IBindableEnumerable<TElement> Invalidates<TElement>(this IBindableEnumerable<TElement> source, Expression expression)
     {
         if (source == null)
             throw Error.ArgumentNull(nameof(source));
 
-        source.Executed += Source_Executed;
+		source.SetTarget(expression);
 
-        return source;
-
-        void Source_Executed ( object sender, EventArgs e )
-        {
-            var source = ( (IBindableEnumerable) sender );
-
-            source.Executed -= Source_Executed;
-
-            if ( source.Source is INotifyCollectionChanged ncc )
-            {
-                // TODO: Dispose properly in binder
-                ncc.CollectionChanged += (o, e) => source.Binder.Invalidate ( expression );
-            }
-        }
+		return source;
     }
 
 	// NOTE: IReadOnlyList? Needs a way to add to collection
+	//       Rename ToCollection?
 	public static TCollection ToList <TCollection, TElement>(this IEnumerable<TElement> source)
         where TCollection : ICollection<TElement>, new ( )
     {
-        var output = new TCollection ( );
+		var collection = new TCollection ( );
         foreach ( var item in source )
-            output.Add ( item );
+            collection.Add ( item );
 
-        // TODO: Listen to BindableQuery changes instead
-        if ( source is IBindableEnumerable bindable && bindable.Source is INotifyCollectionChanged ncc )
-        {
-            ncc.CollectionChanged += (o, e) =>
-            {
-                output.Clear ( );
-                foreach ( var item in source )
-                    output.Add ( item );
-            };
-        }
+		if ( source is IBindableEnumerable bindable )
+			bindable.SetTarget ( collection );
 
-        return output;
+        return collection;
     }
 
 
