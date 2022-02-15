@@ -269,7 +269,53 @@ public sealed class Trigger
     }
 }
 
-// TODO: Cache or reuse rewritten expressions...
+public sealed class ExpressionSubscription : IDisposable
+{
+    public IMemberSubscriber MemberSubscriber { get; }
+    public IBindingScheduler Scheduler { get; }
+
+    readonly Expression expression;
+    readonly List<Trigger> triggers;
+    readonly Action<object, MemberInfo, int> callback;
+
+    public ExpressionSubscription ( IMemberSubscriber observer, IBindingScheduler scheduler, Expression expression, Action<object, MemberInfo, int> callback )
+    {
+        MemberSubscriber = observer;
+        Scheduler = scheduler;
+
+        this.expression = expression;
+        this.callback = callback;
+
+        triggers = Trigger.ExtractTriggers ( expression );
+    }
+
+    public void Subscribe ( )
+    {
+        foreach ( var t in triggers )
+        {
+            t.Subscription?.Dispose ( );
+            t.Subscription = null;
+
+            Scheduler.Schedule ( t.Expression, target =>
+            {
+                t.Subscription = MemberSubscriber.Subscribe ( target, t.Member, changeid => callback ( target, t.Member, changeid ) );
+            } );
+        }
+    }
+
+    public void Unsubscribe ( )
+    {
+        foreach ( var t in triggers )
+        {
+            t.Subscription?.Dispose ( );
+            t.Subscription = null;
+        }
+    }
+
+    public void Dispose ( ) => Unsubscribe ( );
+}
+
+// TODO: Cache or reuse rewritten expressions in scheduler
 public sealed class Binding : IBinding
 {
     public IMemberSubscriber MemberSubscriber { get; }
@@ -280,8 +326,8 @@ public sealed class Binding : IBinding
     readonly Expression left;
     readonly Expression right;
 
-    readonly List<Trigger> leftTriggers;
-    readonly List<Trigger> rightTriggers;
+    readonly ExpressionSubscription leftSub;
+    readonly ExpressionSubscription rightSub;
 
     public Binding ( IMemberSubscriber observer, IBindingScheduler scheduler, Expression left, Expression right )
     {
@@ -299,8 +345,8 @@ public sealed class Binding : IBinding
         this.left  = left;
         this.right = right;
 
-        leftTriggers = Trigger.ExtractTriggers ( left );
-        rightTriggers = Trigger.ExtractTriggers ( right );
+        leftSub  = CreateSubscription ( left, right );
+        rightSub = CreateSubscription ( right, left );
 
         if ( ExprHelper.IsWritable ( left ) )
         {
@@ -320,8 +366,8 @@ public sealed class Binding : IBinding
     {
         Callback ( expression, member, value );
 
-        Resubscribe ( leftTriggers, left, right );
-        Resubscribe ( rightTriggers, right, left );
+        leftSub .Subscribe ( );
+        rightSub.Subscribe ( );
     }
 
     private Expression?  collectionExpression;
@@ -331,8 +377,8 @@ public sealed class Binding : IBinding
     {
         if ( leftValue == null )
         {
-            Resubscribe ( leftTriggers, left, right );
-            Resubscribe ( rightTriggers, right, left );
+            leftSub .Subscribe ( );
+            rightSub.Subscribe ( );
 
             return;
         }
@@ -341,8 +387,8 @@ public sealed class Binding : IBinding
         {
             collectionSubscription = BindCollections2 ( leftValue, rightValue );
 
-            Resubscribe ( leftTriggers, left, right );
-            Resubscribe ( rightTriggers, right, left );
+            leftSub .Subscribe ( );
+            rightSub.Subscribe ( );
         } );
     }
 
@@ -372,8 +418,8 @@ public sealed class Binding : IBinding
             {
                 leftValue.Clear ( );
                 if ( rightValue != null )
-                foreach ( var item in rightValue )
-                    leftValue.Add ( item );
+                    foreach ( var item in rightValue )
+                        leftValue.Add ( item );
             };
 
             // TODO: Return disconnecting disposable
@@ -395,16 +441,16 @@ public sealed class Binding : IBinding
 
     public void Dispose ( )
     {
-        Unsubscribe ( leftTriggers );
-        Unsubscribe ( rightTriggers );
+        leftSub .Dispose ( );
+        rightSub.Dispose ( );
     }
 
-    void Resubscribe ( List<Trigger> triggers, Expression expr, Expression dependentExpr )
+    ExpressionSubscription CreateSubscription ( Expression expr, Expression dependentExpr )
     {
-        Unsubscribe ( triggers );
-        Subscribe ( triggers, changeId => OnSideChanged ( expr, dependentExpr, changeId ) );
+        return new ExpressionSubscription ( MemberSubscriber, Scheduler, expr, (o, m, changeId) => OnSideChanged ( expr, dependentExpr, changeId ) );
     }
 
+    // TODO: Remove HashSet usages
     int nextChangeId = 1;
     readonly HashSet<int> activeChangeIds = new HashSet<int> ( );
 
@@ -428,26 +474,6 @@ public sealed class Binding : IBinding
             Callback (e, m, a);
             activeChangeIds.Remove ( changeId );
         } );
-    }
-
-    static void Unsubscribe ( List<Trigger> triggers )
-    {
-        foreach ( var t in triggers )
-        {
-            t.Subscription?.Dispose ( );
-            t.Subscription = null;
-        }
-    }
-
-    void Subscribe ( List<Trigger> triggers, Action<int> action )
-    {
-        foreach ( var t in triggers )
-        {
-            Scheduler.Schedule ( t.Expression, target =>
-            {
-                t.Subscription = MemberSubscriber.Subscribe ( target, t.Member, action );
-            } );
-        }
     }
 }
 

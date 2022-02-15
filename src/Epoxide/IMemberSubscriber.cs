@@ -5,6 +5,7 @@ using System.ComponentModel;
 
 namespace Epoxide;
 
+// TODO: MemberChangedCallback with changeId parameter
 public interface IMemberSubscriber
 {
     IDisposable Subscribe ( object target, MemberInfo member, Action<int> k );
