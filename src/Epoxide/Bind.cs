@@ -85,6 +85,10 @@ public class Binder : IBinder
     }
 }
 
+// TODO: For disposing of BindableEnumerable subscriptions, add Register/Unregister ( IDisposable )
+// TODO: Make BindableEnumerable take a binding instead, and add IBinder here
+// TODO: Add easy way to create empty Binding for AsBindable stand-alone support (AsBindable ( IBinder, out var binding )
+// TODO: Add Bind/Unbind, and bind outside ctor
 public interface IBinding : IDisposable
 {
 

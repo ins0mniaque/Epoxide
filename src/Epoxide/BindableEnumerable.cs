@@ -18,6 +18,7 @@ public interface IBindableEnumerable : IEnumerable
 
 	// NOTE: Hide inside internal interface?
 	IEnumerable ProcessChanges ( IEnumerable changes );
+	void        ReportChanges  ( IBindableEnumerable enumerable, IEnumerable changes );
 
 	void SetTarget < TElement > ( ICollection < TElement > collection );
 	void SetTarget				( Expression			   expression );
@@ -56,6 +57,8 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
     }
 
 	public abstract IEnumerable ProcessChanges ( IEnumerable changes );
+
+	public abstract void ReportChanges ( IBindableEnumerable enumerable, IEnumerable changes );
 
 	IEnumerable IBindableEnumerable.Source => Source;
 
@@ -141,8 +144,25 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 		return changes;
     }
 
+    public override void ReportChanges ( IBindableEnumerable enumerable, IEnumerable changes )
+    {
+		if ( _chain == null )
+			throw new InvalidOperationException ( "BindableEnumerable must be enumerated first" );
+
+		foreach ( var op in _chain.SkipWhile ( op => op != enumerable ) )
+			changes = op.ProcessChanges ( changes );
+
+		ApplyChanges ( changes );
+    }
+
     // TODO: Dispose of subscription properly
-    private IDisposable? subscription;
+    private IDisposable?			subscription;
+	private Action < IEnumerable >? applyChanges;
+
+	protected void ApplyChanges ( IEnumerable changes )
+    {
+		applyChanges?.Invoke ( changes );
+    }
 
     public override void SetTarget < TElement > ( ICollection < TElement > collection )
     {
@@ -155,11 +175,10 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 		if ( _chain.Count == 0 && typeof ( T ) != typeof ( TElement ) )
 			throw new ArgumentException ( $"Collection element type should be { TypeHelper.FindGenericType ( typeof ( IEnumerable < > ), typeof ( T ) )?.Name }", nameof ( collection ) );
 
-		subscription?.Dispose ( );
-		subscription = Binder.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
+		applyChanges = c =>
         {
-			var changes = ProcessChanges ( Enumerable.Repeat ( change, 1 ) ).Cast < CollectionChange < TElement > > ( );
-			
+			var changes = c.Cast < CollectionChange < TElement > > ( ).ToList ( );
+
 			// TODO: Add change processor
 			if ( changes.Any ( ) )
 			{
@@ -167,6 +186,12 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 				foreach ( var item in (IEnumerable<TElement>) _chain [ ^1 ] )
 					collection.Add ( item );
 			}
+        };
+
+		subscription?.Dispose ( );
+		subscription = Binder.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
+        {
+			ApplyChanges ( ProcessChanges ( Enumerable.Repeat ( change, 1 ) ) );
         } );
     }
 
@@ -178,12 +203,16 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
         {
             Executed -= Source_Executed;
 
+			applyChanges = changes =>
+			{
+				if ( changes.Cast < object > ( ).Any ( ) )
+					Binder.Invalidate ( expression );
+			};
+
 			subscription?.Dispose ( );
 			subscription = Binder.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
 			{
-				var changes = ProcessChanges ( Enumerable.Repeat ( change, 1 ) ).Cast < object > ( );
-				if ( changes.Any ( ) )
-					Binder.Invalidate ( expression );
+				ApplyChanges ( ProcessChanges ( Enumerable.Repeat ( change, 1 ) ) );
 			} );
         }
     }
@@ -193,7 +222,7 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 
 public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumerable < TResult >, IBindableEnumerable < TSource, TResult >
 {
-	public BindableEnumerable(IBindableEnumerable < TSource > parent)
+	protected BindableEnumerable(IBindableEnumerable < TSource > parent)
     {
 		Parent = parent;
     }
@@ -221,6 +250,11 @@ public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumer
     public virtual IEnumerable<CollectionChange<TResult>> ProcessChanges ( IEnumerable<CollectionChange<TSource>> changes )
     {
 		yield return CollectionChange<TResult>.Refreshed ( );
+    }
+
+    public override void ReportChanges ( IBindableEnumerable enumerable, IEnumerable changes )
+    {
+		Parent.ReportChanges ( enumerable, changes );
     }
 }
 
@@ -251,12 +285,45 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 
 	private readonly Expression<Func<T, bool>> _predicate;
 	private Func<T, bool>? _compiledPredicate;
+	private List<List<Trigger>>? _triggers;
 
     protected override IEnumerator<T> GetEnumerator ( )
     {
 		_compiledPredicate ??= CachedExpressionCompiler.Compile ( _predicate );
 
-		return Parent.Where ( _compiledPredicate ).GetEnumerator ( );
+		var list = new List < T > ( Parent );
+		if ( list.Count == 0 )
+			return list.GetEnumerator ( );
+
+		if ( _triggers != null )
+        {
+			foreach ( var t in _triggers.SelectMany ( _ => _ ) )
+            {
+				t.Subscription?.Dispose ( );
+				t.Subscription = null;
+            }
+        }
+
+		_triggers = list.Select ( _ => Trigger.ExtractTriggers ( _predicate.Body ) ).ToList ( ); // TODO: Clone
+		var trigger0 = _triggers [ 0 ];
+
+		for ( var t = 0; t < trigger0.Count; t++ )
+        {
+			var trigger = trigger0 [ t ];
+			var c = CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert(trigger.Expression, typeof(object)), _predicate.Parameters ) );
+
+			for ( var index = 0; index < list.Count; index++ )
+				_triggers [ index ] [ t ].Subscription = Binder.Services.MemberSubscriber.Subscribe ( c ( list [ index ] ), trigger.Member, Callback );
+        }
+
+		// TODO: Get item and index
+		// TODO: Scheduling
+		void Callback ( int changeId )
+        {
+			ReportChanges ( this, Enumerable.Repeat ( CollectionChange < T >.Refreshed ( ), 1 ) );
+        }
+
+		return list.Where ( _compiledPredicate ).GetEnumerator ( );
     }
 }
 
