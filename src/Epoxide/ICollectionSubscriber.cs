@@ -31,7 +31,8 @@ public enum CollectionOperation
     RemoveRange,
     Move,
     Replace,
-    Clear
+    Clear,
+    Refresh
 }
 
 public sealed class CollectionChange < T >
@@ -86,6 +87,11 @@ public sealed class CollectionChange < T >
     public static CollectionChange < T > Cleared ( )
     {
         return new ( CollectionOperation.Clear );
+    }
+
+    public static CollectionChange < T > Refreshed ( )
+    {
+        return new ( CollectionOperation.Refresh );
     }
 
     private CollectionChange ( CollectionOperation operation, IReadOnlyList < T >? items = null, T? item = default, int index = -1, bool hasReplacedItem = false, T? replacedItem = default, int movedFromIndex = -1 )
