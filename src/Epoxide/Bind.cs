@@ -50,7 +50,11 @@ public class Binder : IBinder
 
     public IBinding Bind < T > ( Expression < Func < T > > specifications )
     {
-        return Parse ( specifications.Body );
+        var binding = Parse ( specifications.Body );
+
+        binding.Bind ( );
+
+        return binding;
     }
 
     IBinding Parse ( Expression expr )
@@ -91,12 +95,13 @@ public class Binder : IBinder
     }
 }
 
-// TODO: Add easy way to create empty Binding for AsBindable stand-alone support (AsBindable ( IBinder, out var binding )
-// TODO: Add Bind/Unbind, and bind outside ctor
 public interface IBinding : IDisposable
 {
     // NOTE: Hide behind interface?
     IBinderServices Services { get; }
+
+    void Bind   ( );
+    void Unbind ( );
 
     void Attach ( IDisposable disposable );
     bool Detach ( IDisposable disposable );
@@ -397,22 +402,31 @@ public sealed class Binding : IBinding
 
         disposables.Add ( leftSub  = CreateSubscription ( left, right ) );
         disposables.Add ( rightSub = CreateSubscription ( right, left ) );
-
-        if ( ExprHelper.IsWritable ( left ) )
-        {
-            services.Scheduler.Write ( left, right, CallbackAndSubscribe );
-        }
-        else if ( ! ExprHelper.IsWritable ( right ) && ExprHelper.IsReadOnlyCollection ( left ) )
-        {
-            services.Scheduler.Read ( collectionExpression = left, SubscribeToCollection );
-        }
-        else
-        {
-            services.Scheduler.Write ( right, left, CallbackAndSubscribe );
-        }
     }
 
     public IBinderServices Services { get; }
+
+    public void Bind ( )
+    {
+        if ( ExprHelper.IsWritable ( left ) )
+        {
+            Services.Scheduler.Write ( left, right, CallbackAndSubscribe );
+        }
+        else if ( ! ExprHelper.IsWritable ( right ) && ExprHelper.IsReadOnlyCollection ( left ) )
+        {
+            Services.Scheduler.Read ( collectionExpression = left, SubscribeToCollection );
+        }
+        else
+        {
+            Services.Scheduler.Write ( right, left, CallbackAndSubscribe );
+        }
+    }
+
+    public void Unbind ( )
+    {
+        leftSub .Unsubscribe ( );
+        rightSub.Unsubscribe ( );
+    }
 
     public void Attach  ( IDisposable disposable ) => disposables.Add     ( disposable );
     public bool Detach  ( IDisposable disposable ) => disposables.Remove  ( disposable );
@@ -535,6 +549,18 @@ public sealed class CompositeBinding : IBinding
     }
 
     public IBinderServices Services { get; }
+
+    public void Bind ( )
+    {
+        foreach ( var binding in disposables.ToArray ( ).OfType < IBinding > ( ) )
+            binding.Bind ( );
+    }
+
+    public void Unbind ( )
+    {
+        foreach ( var binding in disposables.ToArray ( ).OfType < IBinding > ( ) )
+            binding.Unbind ( );
+    }
 
     public void Attach  ( IDisposable disposable ) => disposables.Add     ( disposable );
     public bool Detach  ( IDisposable disposable ) => disposables.Remove  ( disposable );

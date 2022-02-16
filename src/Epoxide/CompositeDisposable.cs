@@ -223,6 +223,34 @@ public sealed class CompositeDisposable
     }
 
     /// <summary>
+    /// Returns the disposables contained in the <see cref="CompositeDisposable"/> in an array.
+    /// </summary>
+    public IDisposable[] ToArray()
+    {
+        lock (_gate)
+        {
+            // disposed composites are always clear
+            if (_disposed || _count == 0)
+            {
+                return Array.Empty<IDisposable>();
+            }
+
+            var array = new IDisposable[_count];
+            var index = 0;
+
+            foreach (var d in _disposables)
+            {
+                if (d != null)
+                {
+                    array[index++] = d;
+                }
+            }
+
+            return array;
+        }
+    }
+
+    /// <summary>
     /// Gets a value that indicates whether the object is disposed.
     /// </summary>
     public bool IsDisposed => Volatile.Read(ref _disposed);
