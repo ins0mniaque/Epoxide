@@ -307,6 +307,7 @@ public sealed class Trigger
     }
 }
 
+// TODO: Store schedule disposables while scheduling
 public sealed class ExpressionSubscription : IDisposable
 {
     readonly IBinderServices services;
@@ -359,6 +360,8 @@ public sealed class Binding : IBinding
 
     readonly Expression left;
     readonly Expression right;
+
+    // TODO: Split into 2 binding classes
     readonly bool isReadOnlyCollection;
 
     readonly ExpressionSubscription leftSub;
@@ -406,17 +409,33 @@ public sealed class Binding : IBinding
 
     public IBinderServices Services { get; }
 
-    // TODO: Store schedule disposables while scheduling
-
     public void Bind ( )
     {
         if ( isReadOnlyCollection )
         {
-            Services.Scheduler.Schedule ( left, (object?) null, ReadAndBindCollection );
+            Schedule ( left, (object?) null, ReadAndBindCollection );
         }
         else
         {
-            Services.Scheduler.Schedule ( right, (object?) null, ReadAndWrite );
+            Schedule ( right, (object?) null, ReadAndWrite );
+        }
+    }
+
+    private void Schedule < TState > ( Expression expression, TState state, Action < TState > action )
+    {
+        var scheduled = (IDisposable?) null;
+
+        scheduled = Services.Scheduler.Schedule ( expression, state, InvokeAndUnschedule );
+
+        if ( scheduled != null )
+            disposables.Add ( scheduled );
+
+        void InvokeAndUnschedule ( TState state )
+        {
+            action ( state );
+
+            if ( scheduled != null )
+                disposables.Remove ( scheduled );
         }
     }
 
@@ -445,7 +464,7 @@ public sealed class Binding : IBinding
             return;
         }
 
-        Services.Scheduler.Schedule ( left, rightValue, Write );
+        Schedule ( left, rightValue, Write );
     }
 
     private void Write ( object? leftValue )
@@ -467,7 +486,7 @@ public sealed class Binding : IBinding
             return;
         }
 
-        Services.Scheduler.Schedule ( right, leftValue, BindCollection );
+        Schedule ( right, leftValue, BindCollection );
     }
 
     private void BindCollection ( object leftValue )
@@ -517,17 +536,17 @@ public sealed class Binding : IBinding
 
         if ( isReadOnlyCollection )
         {
-            Services.Scheduler.Schedule ( left, (object?) null, ReadAndBindCollection );
+            Schedule ( left, (object?) null, ReadAndBindCollection );
             return;
         }
 
         var changeId = nextChangeId++;
         activeChangeIds.Add ( changeId );
-        Services.Scheduler.Schedule ( expr, this, _ =>
+        Schedule ( expr, this, _ =>
         {
             if ( TryRead ( expr, out var leftValue ) )
             {
-                Services.Scheduler.Schedule ( dependentExpr, this, _ =>
+                Schedule ( dependentExpr, this, _ =>
                 {
                     if ( dependentExpr.TryWrite ( leftValue, out var target, out var member ) )
                         Callback ( dependentExpr, member, changeId );
