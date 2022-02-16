@@ -188,11 +188,7 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
         };
 
 		if ( subscription != null )
-        {
 			Binding.Detach ( subscription );
-
-			subscription.Dispose ( );
-        }
 
 		subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
         {
@@ -217,11 +213,7 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 			};
 
 			if ( subscription != null )
-			{
 				Binding.Detach ( subscription );
-
-				subscription.Dispose ( );
-			}
 
 			subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
 			{
