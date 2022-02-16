@@ -293,6 +293,7 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 
 	private readonly Expression<Func<T, bool>> _predicate;
 	private Func<T, bool>? _compiledPredicate;
+	private List<Trigger>? _triggersSource;
 	private List<List<Trigger>>? _triggers;
 
     protected override IEnumerator<T> GetEnumerator ( )
@@ -312,12 +313,14 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
             }
         }
 
-		_triggers = list.Select ( _ => Trigger.ExtractTriggers ( _predicate.Body ) ).ToList ( ); // TODO: Clone
-		var trigger0 = _triggers [ 0 ];
+		_triggersSource ??= Trigger.ExtractTriggers ( _predicate.Body );
 
-		for ( var t = 0; t < trigger0.Count; t++ )
+		_triggers = list.Select ( _ => _triggersSource.Select ( t => new Trigger { Expression = t.Expression, Member = t.Member } ).ToList ( ) )
+						.ToList ( );
+
+		for ( var t = 0; t < _triggersSource.Count; t++ )
         {
-			var trigger = trigger0 [ t ];
+			var trigger = _triggersSource [ t ];
 			var c = CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert(trigger.Expression, typeof(object)), _predicate.Parameters ) );
 
 			for ( var index = 0; index < list.Count; index++ )

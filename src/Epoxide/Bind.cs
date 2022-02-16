@@ -357,12 +357,11 @@ public sealed class Binding : IBinding
 {
     readonly CompositeDisposable disposables;
 
-    object Value;
+    object? Value;
 
     readonly Expression left;
     readonly Expression right;
 
-    // TODO: Split into 2 binding classes
     readonly bool isReadOnlyCollection;
 
     readonly ExpressionSubscription leftSub;
@@ -514,37 +513,28 @@ public sealed class Binding : IBinding
 
     private void Callback ( Expression expression, MemberInfo member, object? value )
     {
-        var e = Equals ( Value, value );
-
-        Value = value;
-
-        if ( ! e )
+        if ( ! Equals ( Value, Value = value ) )
             Services.MemberSubscriber.Invalidate ( expression, member );
     }
 
     ExpressionSubscription CreateSubscription ( Expression expr, Expression dependentExpr )
     {
-        return new ExpressionSubscription ( Services, expr, (o, m) => OnSideChanged ( expr, dependentExpr ) );
-    }
-
-    void OnSideChanged ( Expression expr, Expression dependentExpr )
-    {
         if ( isReadOnlyCollection )
-        {
-            Schedule ( left, (object?) null, ReadAndBindCollection );
-            return;
-        }
+            return new ExpressionSubscription ( Services, expr, (o, m) => Schedule ( left, (object?) null, ReadAndBindCollection ) );
 
-        Schedule ( expr, this, _ =>
+        return new ExpressionSubscription ( Services, expr, (o, m) =>
         {
-            if ( TryRead ( expr, out var leftValue ) )
+            Schedule ( expr, (object?) null, _ =>
             {
-                Schedule ( dependentExpr, this, _ =>
+                if ( TryRead ( expr, out var leftValue ) )
                 {
-                    if ( dependentExpr.TryWrite ( leftValue, out var target, out var member ) )
-                        Callback ( dependentExpr, member, leftValue );
-                } );
-            }
+                    Schedule ( dependentExpr, (object?) null, _ =>
+                    {
+                        if ( dependentExpr.TryWrite ( leftValue, out var target, out var member ) )
+                            Callback ( dependentExpr, member, leftValue );
+                    } );
+                }
+            } );
         } );
     }
 }
