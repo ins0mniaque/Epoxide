@@ -3,7 +3,7 @@
 /// <summary>
 /// Represents a group of disposable resources that are disposed together.
 /// </summary>
-public sealed class CompositeDisposable
+public sealed class CompositeDisposable : IDisposable
 {
     private readonly object _gate = new object();
     private bool _disposed;
