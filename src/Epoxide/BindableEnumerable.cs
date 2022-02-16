@@ -10,8 +10,8 @@ public interface IBindableEnumerable : IEnumerable
 {
 	event EventHandler < EventArgs >? Executed;
 
-	IBinder     Binder { get; }
-	IEnumerable Source { get; }
+	IBinding    Binding { get; }
+	IEnumerable Source  { get; }
 
 	// NOTE: Hide inside internal interface?
 	void NotifyExecuted ( IBindableEnumerable enumerable );
@@ -45,8 +45,8 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
 {
     public event EventHandler < EventArgs >? Executed;
 
-    public abstract IBinder     Binder { get; }
-    public abstract IEnumerable Source { get; }
+    public abstract IBinding    Binding { get; }
+    public abstract IEnumerable Source  { get; }
 
 	public abstract void SetTarget < TElement > ( ICollection < TElement > collection );
 	public abstract void SetTarget				( Expression			   expression );
@@ -103,23 +103,23 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
 
 public class BindableEnumerable < T > : ExecutableEnumerable < T >
 {
-	private readonly IBinder _binder;
+	private readonly IBinding _binding;
 	private IEnumerable<T> _enumerable;
 	private List<IBindableEnumerable>? _chain;
 
-    public BindableEnumerable(IBinder binder, IEnumerable<T> enumerable)
+    public BindableEnumerable(IBinding binding, IEnumerable<T> enumerable)
     {
-        _binder     = binder;
+        _binding    = binding;
         _enumerable = enumerable;
     }
 
-	protected BindableEnumerable(IBinder binder)
+	protected BindableEnumerable(IBinding binding)
     {
-        _binder     = binder;
+        _binding    = binding;
         _enumerable = this;
     }
 
-    public override IBinder Binder => _binder;
+    public override IBinding Binding => _binding;
 
 	public override IEnumerable Source => _enumerable;
 
@@ -189,7 +189,7 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
         };
 
 		subscription?.Dispose ( );
-		subscription = Binder.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
+		subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
         {
 			ApplyChanges ( ProcessChanges ( Enumerable.Repeat ( change, 1 ) ) );
         } );
@@ -206,11 +206,11 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 			applyChanges = changes =>
 			{
 				if ( changes.Cast < object > ( ).Any ( ) )
-					Binder.Invalidate ( expression );
+					Binding.Invalidate ( expression );
 			};
 
 			subscription?.Dispose ( );
-			subscription = Binder.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
+			subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
 			{
 				ApplyChanges ( ProcessChanges ( Enumerable.Repeat ( change, 1 ) ) );
 			} );
@@ -227,7 +227,7 @@ public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumer
 		Parent = parent;
     }
 
-	public override IBinder Binder => Parent.Binder;
+	public override IBinding Binding => Parent.Binding;
 
 	public override IEnumerable Source => Parent.Source;
 
@@ -313,7 +313,7 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 			var c = CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert(trigger.Expression, typeof(object)), _predicate.Parameters ) );
 
 			for ( var index = 0; index < list.Count; index++ )
-				_triggers [ index ] [ t ].Subscription = Binder.Services.MemberSubscriber.Subscribe ( c ( list [ index ] ), trigger.Member, Callback );
+				_triggers [ index ] [ t ].Subscription = Binding.Services.MemberSubscriber.Subscribe ( c ( list [ index ] ), trigger.Member, Callback );
         }
 
 		// TODO: Get item and index
@@ -338,7 +338,7 @@ public static class BindableEnumerable
         if(source is IBindableEnumerable<TElement> bindable)
             return bindable;
 
-        return new BindableEnumerable<TElement>(Binder.Default, source);
+        return new BindableEnumerable<TElement>(Binder.Default.Bind(), source);
     }
 
 	// TODO: Remove extension and call directly in rewriter

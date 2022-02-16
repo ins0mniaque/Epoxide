@@ -22,6 +22,7 @@ public interface IBinder
 {
     IBinderServices Services { get; }
 
+    IBinding Bind ( );
     IBinding Bind < T > ( Expression < Func < T > > specifications );
 }
 
@@ -41,6 +42,11 @@ public class Binder : IBinder
     }
 
     public IBinderServices Services { get; }
+
+    public IBinding Bind ( )
+    {
+        return new CompositeBinding ( Services, Enumerable.Empty < IBinding > ( ) );
+    }
 
     public IBinding Bind < T > ( Expression < Func < T > > specifications )
     {
@@ -72,7 +78,7 @@ public class Binder : IBinder
 
             parts.Reverse ( );
 
-            return new CompositeBinding ( parts.Select ( Parse ) );
+            return new CompositeBinding ( Services, parts.Select ( Parse ) );
         }
 
         if ( expr.NodeType == ExpressionType.Equal )
@@ -86,12 +92,12 @@ public class Binder : IBinder
 }
 
 // TODO: For disposing of BindableEnumerable subscriptions, add Register/Unregister ( IDisposable )
-// TODO: Make BindableEnumerable take a binding instead, and add IBinder here
 // TODO: Add easy way to create empty Binding for AsBindable stand-alone support (AsBindable ( IBinder, out var binding )
 // TODO: Add Bind/Unbind, and bind outside ctor
 public interface IBinding : IDisposable
 {
-
+    // NOTE: Hide behind interface?
+    IBinderServices Services { get; }
 }
 
 public static class ExprHelper
@@ -260,12 +266,22 @@ public static class DefaultBinder
 
     public static void Invalidate ( this IBinder binder, Expression expression )
     {
+        binder.Services.Invalidate ( expression );
+    }
+
+    public static void Invalidate ( this IBinding binding, Expression expression )
+    {
+        binding.Services.Invalidate ( expression );
+    }
+
+    public static void Invalidate ( this IBinderServices services, Expression expression )
+    {
         if ( expression.NodeType == ExpressionType.MemberAccess )
         {
             var m = (MemberExpression) expression;
             var x = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( m.Expression );
             if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != SentinelPropogationVisitor.Sentinel )
-                binder.Services.MemberSubscriber.Invalidate ( obj, m.Member, 0 );
+                services.MemberSubscriber.Invalidate ( obj, m.Member, 0 );
         }
         else
             throw new NotSupportedException();
@@ -350,8 +366,6 @@ public sealed class Binding : IBinding
 {
     object Value;
 
-    readonly IBinderServices services;
-
     readonly Expression left;
     readonly Expression right;
 
@@ -360,7 +374,7 @@ public sealed class Binding : IBinding
 
     public Binding ( IBinderServices services, Expression left, Expression right )
     {
-        this.services = services;
+        Services = services;
 
         left = new EnumerableToCollectionVisitor         ( right.Type ).Visit ( left );
         left = new EnumerableToBindableEnumerableVisitor ( )           .Visit ( left );
@@ -390,6 +404,8 @@ public sealed class Binding : IBinding
         }
     }
 
+    public IBinderServices Services { get; }
+
     private void CallbackAndSubscribe ( Expression expression, MemberInfo member, object? value )
     {
         Callback ( expression, member, value );
@@ -411,7 +427,7 @@ public sealed class Binding : IBinding
             return;
         }
 
-        services.Scheduler.Read ( right, rightValue =>
+        Services.Scheduler.Read ( right, rightValue =>
         {
             collectionSubscription = BindCollections2 ( leftValue, rightValue );
 
@@ -441,7 +457,7 @@ public sealed class Binding : IBinding
         foreach ( var item in rightValue )
             leftValue.Add ( item );
 
-        return services.CollectionSubscriber.Subscribe ( rightValue, (o, e) =>
+        return Services.CollectionSubscriber.Subscribe ( rightValue, (o, e) =>
         {
             leftValue.Clear ( );
             if ( rightValue != null )
@@ -457,7 +473,7 @@ public sealed class Binding : IBinding
         Value = value;
 
         if ( ! e )
-            services.MemberSubscriber.Invalidate ( expression, member, nextChangeId++ );
+            Services.MemberSubscriber.Invalidate ( expression, member, nextChangeId++ );
     }
 
     public void Dispose ( )
@@ -468,7 +484,7 @@ public sealed class Binding : IBinding
 
     ExpressionSubscription CreateSubscription ( Expression expr, Expression dependentExpr )
     {
-        return new ExpressionSubscription ( services, expr, (o, m, changeId) => OnSideChanged ( expr, dependentExpr, changeId ) );
+        return new ExpressionSubscription ( Services, expr, (o, m, changeId) => OnSideChanged ( expr, dependentExpr, changeId ) );
     }
 
     // TODO: Remove HashSet usages
@@ -484,13 +500,13 @@ public sealed class Binding : IBinding
             collectionSubscription?.Dispose ( );
             collectionSubscription = null;
 
-            services.Scheduler.Read ( collectionExpression, SubscribeToCollection );
+            Services.Scheduler.Read ( collectionExpression, SubscribeToCollection );
             return;
         }
 
         var changeId = nextChangeId++;
         activeChangeIds.Add ( changeId );
-        services.Scheduler.Write ( dependentExpr, expr, (e, m, a) =>
+        Services.Scheduler.Write ( dependentExpr, expr, (e, m, a) =>
         {
             Callback (e, m, a);
             activeChangeIds.Remove ( changeId );
@@ -502,10 +518,14 @@ public sealed class CompositeBinding : IBinding
 {
     readonly List<IBinding> bindings;
 
-    public CompositeBinding ( IEnumerable<IBinding> bindings )
+    public CompositeBinding ( IBinderServices services, IEnumerable<IBinding> bindings )
     {
+        Services = services;
+
         this.bindings = bindings.ToList ( );
     }
+
+    public IBinderServices Services { get; }
 
     public void Dispose ( )
     {
