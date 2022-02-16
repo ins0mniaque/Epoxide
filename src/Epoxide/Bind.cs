@@ -351,7 +351,6 @@ public sealed class ExpressionSubscription : IDisposable
 }
 
 // TODO: Cache or reuse rewritten expressions in scheduler
-// TODO: Track attach calls during read, dispose on re-read
 public sealed class Binding : IBinding
 {
     readonly CompositeDisposable disposables;
@@ -365,9 +364,14 @@ public sealed class Binding : IBinding
     readonly ExpressionSubscription leftSub;
     readonly ExpressionSubscription rightSub;
 
+    readonly CompositeDisposable leftContainer;
+    readonly CompositeDisposable rightContainer;
+
+    CompositeDisposable? activeContainer;
+
     public Binding ( IBinderServices services, Expression left, Expression right )
     {
-        disposables = new CompositeDisposable ( 2 );
+        disposables = new CompositeDisposable ( 4 );
 
         Services = services;
 
@@ -396,15 +400,19 @@ public sealed class Binding : IBinding
 
         disposables.Add ( leftSub  = CreateSubscription ( left, right ) );
         disposables.Add ( rightSub = CreateSubscription ( right, left ) );
+        disposables.Add ( leftContainer  = new CompositeDisposable ( ) );
+        disposables.Add ( rightContainer = new CompositeDisposable ( ) );
     }
 
     public IBinderServices Services { get; }
+
+    // TODO: Store schedule disposables while scheduling
 
     public void Bind ( )
     {
         if ( isReadOnlyCollection )
         {
-            Services.Scheduler.Schedule ( left, (object?) null, this.ReadAndBindCollection );
+            Services.Scheduler.Schedule ( left, (object?) null, ReadAndBindCollection );
         }
         else
         {
@@ -412,9 +420,24 @@ public sealed class Binding : IBinding
         }
     }
 
+    private bool TryRead ( Expression expression, out object? value )
+    {
+        if      ( expression == left  ) activeContainer = leftContainer;
+        else if ( expression == right ) activeContainer = rightContainer;
+        else                            activeContainer = null;
+
+        activeContainer?.Clear ( );
+
+        var read = expression.TryRead ( out value );
+
+        activeContainer = null;
+
+        return read;
+    }
+
     private void ReadAndWrite ( object? state )
     {
-        if ( ! right.TryRead ( out var rightValue ) )
+        if ( ! TryRead ( right, out var rightValue ) )
         {
             leftSub .Subscribe ( );
             rightSub.Subscribe ( );
@@ -422,7 +445,7 @@ public sealed class Binding : IBinding
             return;
         }
 
-        Services.Scheduler.Schedule ( left, rightValue, this.Write );
+        Services.Scheduler.Schedule ( left, rightValue, Write );
     }
 
     private void Write ( object? leftValue )
@@ -436,7 +459,7 @@ public sealed class Binding : IBinding
 
     private void ReadAndBindCollection ( object? state )
     {
-        if ( ! left.TryRead ( out var leftValue ) || leftValue == null )
+        if ( ! TryRead ( left, out var leftValue ) || leftValue == null )
         {
             leftSub .Subscribe ( );
             rightSub.Subscribe ( );
@@ -444,15 +467,16 @@ public sealed class Binding : IBinding
             return;
         }
 
-        Services.Scheduler.Schedule ( right, leftValue, this.BindCollection );
+        Services.Scheduler.Schedule ( right, leftValue, BindCollection );
     }
 
     private void BindCollection ( object leftValue )
     {
-        if ( ! right.TryRead ( out var rightValue ) )
+        if ( ! TryRead ( right, out var rightValue ) )
             return;
 
-        collectionSubscription = Services.CollectionSubscriber.BindCollections ( leftValue, rightValue );
+        if ( Services.CollectionSubscriber.BindCollections ( leftValue, rightValue ) is { } binding )
+            rightContainer.Add ( binding );
 
         leftSub .Subscribe ( );
         rightSub.Subscribe ( );
@@ -464,13 +488,9 @@ public sealed class Binding : IBinding
         rightSub.Unsubscribe ( );
     }
 
-    public void Attach  ( IDisposable disposable ) => disposables.Add     ( disposable );
-    public bool Detach  ( IDisposable disposable ) => disposables.Remove  ( disposable );
+    public void Attach  ( IDisposable disposable ) => ( activeContainer ?? disposables ).Add ( disposable );
+    public bool Detach  ( IDisposable disposable ) => leftContainer.Remove ( disposable ) || rightContainer.Remove ( disposable ) || disposables.Remove ( disposable );
     public void Dispose ( )                        => disposables.Dispose ( );
-
-    // TODO: Store in CompositeCollection for active side
-    // TODO: Also store schedule disposables
-    private IDisposable? collectionSubscription;
 
     private void Callback ( Expression expression, MemberInfo member, object? value )
     {
@@ -497,10 +517,7 @@ public sealed class Binding : IBinding
 
         if ( isReadOnlyCollection )
         {
-            collectionSubscription?.Dispose ( );
-            collectionSubscription = null;
-
-            Services.Scheduler.Schedule ( left, (object?) null, this.ReadAndBindCollection );
+            Services.Scheduler.Schedule ( left, (object?) null, ReadAndBindCollection );
             return;
         }
 
@@ -508,7 +525,7 @@ public sealed class Binding : IBinding
         activeChangeIds.Add ( changeId );
         Services.Scheduler.Schedule ( expr, this, _ =>
         {
-            if ( expr.TryRead ( out var leftValue ) )
+            if ( TryRead ( expr, out var leftValue ) )
             {
                 Services.Scheduler.Schedule ( dependentExpr, this, _ =>
                 {
