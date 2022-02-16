@@ -235,10 +235,12 @@ public sealed class CompositeDisposable
                 return Array.Empty<IDisposable>();
             }
 
+            var current = _disposables;
+
             var array = new IDisposable[_count];
             var index = 0;
 
-            foreach (var d in _disposables)
+            foreach (var d in current)
             {
                 if (d != null)
                 {
