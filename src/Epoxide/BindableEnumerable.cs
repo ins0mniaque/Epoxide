@@ -155,7 +155,6 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 		ApplyChanges ( changes );
     }
 
-    // TODO: Dispose of subscription properly
     private IDisposable?			subscription;
 	private Action < IEnumerable >? applyChanges;
 
@@ -188,11 +187,19 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 			}
         };
 
-		subscription?.Dispose ( );
+		if ( subscription != null )
+        {
+			Binding.Detach ( subscription );
+
+			subscription.Dispose ( );
+        }
+
 		subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
         {
 			ApplyChanges ( ProcessChanges ( Enumerable.Repeat ( change, 1 ) ) );
         } );
+
+		Binding.Attach ( subscription );
     }
 
 	public override void SetTarget ( Expression expression )
@@ -209,11 +216,19 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 					Binding.Invalidate ( expression );
 			};
 
-			subscription?.Dispose ( );
+			if ( subscription != null )
+			{
+				Binding.Detach ( subscription );
+
+				subscription.Dispose ( );
+			}
+
 			subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
 			{
 				ApplyChanges ( ProcessChanges ( Enumerable.Repeat ( change, 1 ) ) );
 			} );
+
+			Binding.Attach ( subscription );
         }
     }
 

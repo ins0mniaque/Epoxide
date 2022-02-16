@@ -91,13 +91,15 @@ public class Binder : IBinder
     }
 }
 
-// TODO: For disposing of BindableEnumerable subscriptions, add Register/Unregister ( IDisposable )
 // TODO: Add easy way to create empty Binding for AsBindable stand-alone support (AsBindable ( IBinder, out var binding )
 // TODO: Add Bind/Unbind, and bind outside ctor
 public interface IBinding : IDisposable
 {
     // NOTE: Hide behind interface?
     IBinderServices Services { get; }
+
+    void Attach ( IDisposable disposable );
+    bool Detach ( IDisposable disposable );
 }
 
 public static class ExprHelper
@@ -364,6 +366,8 @@ public sealed class ExpressionSubscription : IDisposable
 // TODO: Cache or reuse rewritten expressions in scheduler
 public sealed class Binding : IBinding
 {
+    readonly CompositeDisposable disposables;
+
     object Value;
 
     readonly Expression left;
@@ -374,6 +378,8 @@ public sealed class Binding : IBinding
 
     public Binding ( IBinderServices services, Expression left, Expression right )
     {
+        disposables = new CompositeDisposable ( 2 );
+
         Services = services;
 
         left = new EnumerableToCollectionVisitor         ( right.Type ).Visit ( left );
@@ -387,8 +393,8 @@ public sealed class Binding : IBinding
         this.left  = left;
         this.right = right;
 
-        leftSub  = CreateSubscription ( left, right );
-        rightSub = CreateSubscription ( right, left );
+        disposables.Add ( leftSub  = CreateSubscription ( left, right ) );
+        disposables.Add ( rightSub = CreateSubscription ( right, left ) );
 
         if ( ExprHelper.IsWritable ( left ) )
         {
@@ -405,6 +411,10 @@ public sealed class Binding : IBinding
     }
 
     public IBinderServices Services { get; }
+
+    public void Attach  ( IDisposable disposable ) => disposables.Add     ( disposable );
+    public bool Detach  ( IDisposable disposable ) => disposables.Remove  ( disposable );
+    public void Dispose ( )                        => disposables.Dispose ( );
 
     private void CallbackAndSubscribe ( Expression expression, MemberInfo member, object? value )
     {
@@ -476,12 +486,6 @@ public sealed class Binding : IBinding
             Services.MemberSubscriber.Invalidate ( expression, member, nextChangeId++ );
     }
 
-    public void Dispose ( )
-    {
-        leftSub .Dispose ( );
-        rightSub.Dispose ( );
-    }
-
     ExpressionSubscription CreateSubscription ( Expression expr, Expression dependentExpr )
     {
         return new ExpressionSubscription ( Services, expr, (o, m, changeId) => OnSideChanged ( expr, dependentExpr, changeId ) );
@@ -516,24 +520,21 @@ public sealed class Binding : IBinding
 
 public sealed class CompositeBinding : IBinding
 {
-    readonly List<IBinding> bindings;
+    readonly CompositeDisposable disposables;
 
-    public CompositeBinding ( IBinderServices services, IEnumerable<IBinding> bindings )
+    public CompositeBinding ( IBinderServices services, IEnumerable < IBinding > bindings )
     {
+        disposables = new CompositeDisposable ( );
+
         Services = services;
 
-        this.bindings = bindings.ToList ( );
+        foreach ( var binding in bindings )
+            disposables.Add ( binding );
     }
 
     public IBinderServices Services { get; }
 
-    public void Dispose ( )
-    {
-        foreach ( var b in bindings )
-        {
-            b.Dispose ( );
-        }
-
-        bindings.Clear ( );
-    }
+    public void Attach  ( IDisposable disposable ) => disposables.Add     ( disposable );
+    public bool Detach  ( IDisposable disposable ) => disposables.Remove  ( disposable );
+    public void Dispose ( )                        => disposables.Dispose ( );
 }
