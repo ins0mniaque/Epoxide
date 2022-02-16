@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Specialized;
 using System.Linq.Expressions;
+using System.Reflection;
 
 using Epoxide.Linq;
 
@@ -190,7 +191,7 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 		if ( subscription != null )
 			Binding.Detach ( subscription );
 
-		subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
+		subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (collection, change) =>
         {
 			ApplyChanges ( ProcessChanges ( Enumerable.Repeat ( change, 1 ) ) );
         } );
@@ -215,7 +216,7 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 			if ( subscription != null )
 				Binding.Detach ( subscription );
 
-			subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (change, id) =>
+			subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (collection, change) =>
 			{
 				ApplyChanges ( ProcessChanges ( Enumerable.Repeat ( change, 1 ) ) );
 			} );
@@ -325,7 +326,7 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 
 		// TODO: Get item and index
 		// TODO: Scheduling
-		void Callback ( int changeId )
+		void Callback ( object target, MemberInfo member )
         {
 			ReportChanges ( this, Enumerable.Repeat ( CollectionChange < T >.Invalidated ( ), 1 ) );
         }

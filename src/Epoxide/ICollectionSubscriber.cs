@@ -5,8 +5,8 @@ namespace Epoxide;
 
 public interface ICollectionSubscriber
 {
-    IDisposable Subscribe < T > ( IEnumerable < T > collection, Action<CollectionChange<T>, int> k );
-    void Invalidate < T > ( IEnumerable < T > collection, int changeId = 0 );
+    IDisposable Subscribe < T > ( IEnumerable < T > collection, CollectionChangedCallback < T > k );
+    void Invalidate < T > ( IEnumerable < T > collection );
 }
 
 public interface ICollectionSubscriptionFactory
@@ -152,18 +152,16 @@ public sealed class NotifyCollectionChangedCollectionSubscription < T > : Collec
     private void Collection_CollectionChanged ( object sender, NotifyCollectionChangedEventArgs e )
     {
         Callback ( Collection, ToCollectionChange ( e ) );
-        if ( e.Action == NotifyCollectionChangedAction.Reset && ((IEnumerable < T >) Collection).Any ( ) )
-            Callback ( Collection, CollectionChange<T>.Added((IEnumerable < T >) Collection, 0));
     }
 
     // TODO: Handle null NewItems/OldItems
     private static CollectionChange < T > ToCollectionChange ( NotifyCollectionChangedEventArgs e ) => e.Action switch
     {
-        NotifyCollectionChangedAction.Add     => CollectionChange < T >.Added    ( e.NewItems.Cast < T > ( ), e.NewStartingIndex ),
-        NotifyCollectionChangedAction.Remove  => CollectionChange < T >.Removed  ( e.OldItems.Cast < T > ( ), e.NewStartingIndex ),
-        NotifyCollectionChangedAction.Move    => CollectionChange < T >.Moved    ( (T) e.NewItems [ 0 ], e.NewStartingIndex, e.OldStartingIndex ),
-        NotifyCollectionChangedAction.Replace => CollectionChange < T >.Replaced ( (T)e.NewItems [ 0 ], (T)e.OldItems [ 0 ], e.NewStartingIndex ),
-        NotifyCollectionChangedAction.Reset   => CollectionChange < T >.Cleared  ( ),
+        NotifyCollectionChangedAction.Add     => CollectionChange < T >.Added       ( e.NewItems.Cast < T > ( ), e.NewStartingIndex ),
+        NotifyCollectionChangedAction.Remove  => CollectionChange < T >.Removed     ( e.OldItems.Cast < T > ( ), e.NewStartingIndex ),
+        NotifyCollectionChangedAction.Move    => CollectionChange < T >.Moved       ( (T) e.NewItems [ 0 ], e.NewStartingIndex, e.OldStartingIndex ),
+        NotifyCollectionChangedAction.Replace => CollectionChange < T >.Replaced    ( (T)e.NewItems [ 0 ], (T)e.OldItems [ 0 ], e.NewStartingIndex ),
+        NotifyCollectionChangedAction.Reset   => CollectionChange < T >.Invalidated ( ),
         _ => throw new InvalidEnumArgumentException ( nameof ( e.Action ), (int) e.Action, typeof ( NotifyCollectionChangedAction ) )
     };
 }
@@ -180,7 +178,7 @@ public class CollectionSubscriber : ICollectionSubscriber
     readonly Dictionary<Type, object> typedSubscribers =
         new Dictionary<Type, object> ( );
 
-    public IDisposable Subscribe < T > ( IEnumerable < T > collection, Action<CollectionChange<T>, int> k )
+    public IDisposable Subscribe < T > ( IEnumerable < T > collection, CollectionChangedCallback < T > k )
     {
         var key = typeof(T);
         var sub = (CollectionSubscriber<T>?) null;
@@ -195,7 +193,7 @@ public class CollectionSubscriber : ICollectionSubscriber
         return sub.Subscribe ( collection, k );
     }
 
-    public void Invalidate < T > ( IEnumerable < T > collection, int changeId = 0 )
+    public void Invalidate < T > ( IEnumerable < T > collection )
     {
         var key = typeof(T);
         var sub = (CollectionSubscriber<T>?) null;
@@ -207,7 +205,7 @@ public class CollectionSubscriber : ICollectionSubscriber
         else
             sub = (CollectionSubscriber<T>?) subs;
 
-        sub.Invalidate ( collection, changeId );
+        sub.Invalidate ( collection );
     }
 }
 
@@ -223,7 +221,7 @@ public class CollectionSubscriber < T >
     private class Entry
     {
         public CollectionSubscription< T >? Subscription;
-        public Action<CollectionChange<T>, int>? Action;
+        public CollectionChangedCallback < T >? Action;
     }
 
     readonly Dictionary<IEnumerable < T >, Entry> collectionSubs =
@@ -234,7 +232,7 @@ public class CollectionSubscriber < T >
     {
         public CollectionSubscriber<T> me;
         public Entry MyClass;
-        public Action<CollectionChange<T>, int> Callback;
+        public CollectionChangedCallback < T > Callback;
 
         public void Dispose ( )
         {
@@ -252,7 +250,7 @@ public class CollectionSubscriber < T >
         }
     }
 
-    public IDisposable Subscribe ( IEnumerable < T > collection, Action<CollectionChange<T>, int> k )
+    public IDisposable Subscribe ( IEnumerable < T > collection, CollectionChangedCallback < T > k )
     {
         var key = collection;
         Entry subs;
@@ -270,23 +268,18 @@ public class CollectionSubscriber < T >
         return new Token { me = this, MyClass = subs, Callback = k };
     }
 
+    public void Invalidate ( IEnumerable < T > collection )
+    {
+        Callback ( collection, CollectionChange < T >.Invalidated ( ) );
+    }
+
     private void Callback ( IEnumerable < T > collection, CollectionChange<T> change )
-    {
-        Notify ( collection, change, 0 );
-    }
-
-    public void Invalidate ( IEnumerable < T > collection, int changeId = 0 )
-    {
-        Notify ( collection, CollectionChange < T >.Invalidated ( ), changeId );
-    }
-
-    private void Notify ( IEnumerable < T > collection, CollectionChange< T > change, int changeId = 0 )
     {
         var key = collection;
         if ( collectionSubs.TryGetValue ( key, out var subs ) )
         {
             if ( subs.Action is { } a )
-                a ( change, changeId );
+                a ( collection, change );
         }
     }
 }

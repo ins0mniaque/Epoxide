@@ -269,7 +269,7 @@ public static class DefaultBinder
             var m = (MemberExpression) expression;
             var x = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( m.Expression );
             if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != SentinelPropogationVisitor.Sentinel )
-                services.MemberSubscriber.Invalidate ( obj, m.Member, 0 );
+                services.MemberSubscriber.Invalidate ( obj, m.Member );
         }
         else
             throw new NotSupportedException();
@@ -312,9 +312,9 @@ public sealed class ExpressionSubscription : IDisposable
     readonly IBinderServices services;
     readonly Expression expression;
     readonly List<Trigger> triggers;
-    readonly Action<object, MemberInfo, int> callback;
+    readonly MemberChangedCallback callback;
 
-    public ExpressionSubscription ( IBinderServices services, Expression expression, Action<object, MemberInfo, int> callback )
+    public ExpressionSubscription ( IBinderServices services, Expression expression, MemberChangedCallback callback )
     {
         this.services = services;
         this.expression = expression;
@@ -335,7 +335,7 @@ public sealed class ExpressionSubscription : IDisposable
     private void ReadAndSubscribe ( Trigger t )
     {
         if ( t.Expression.TryRead ( out var target ) )
-            t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, changeid => callback ( target, t.Member, changeid ) );
+            t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, callback );
         else
             t.Subscription = null;
     }
@@ -519,30 +519,22 @@ public sealed class Binding : IBinding
         Value = value;
 
         if ( ! e )
-            Services.MemberSubscriber.Invalidate ( expression, member, nextChangeId++ );
+            Services.MemberSubscriber.Invalidate ( expression, member );
     }
 
     ExpressionSubscription CreateSubscription ( Expression expr, Expression dependentExpr )
     {
-        return new ExpressionSubscription ( Services, expr, (o, m, changeId) => OnSideChanged ( expr, dependentExpr, changeId ) );
+        return new ExpressionSubscription ( Services, expr, (o, m) => OnSideChanged ( expr, dependentExpr ) );
     }
 
-    // TODO: Remove HashSet usages
-    int nextChangeId = 1;
-    readonly HashSet<int> activeChangeIds = new HashSet<int> ( );
-
-    void OnSideChanged ( Expression expr, Expression dependentExpr, int causeChangeId )
+    void OnSideChanged ( Expression expr, Expression dependentExpr )
     {
-        if ( activeChangeIds.Contains ( causeChangeId ) ) return;
-
         if ( isReadOnlyCollection )
         {
             Schedule ( left, (object?) null, ReadAndBindCollection );
             return;
         }
 
-        var changeId = nextChangeId++;
-        activeChangeIds.Add ( changeId );
         Schedule ( expr, this, _ =>
         {
             if ( TryRead ( expr, out var leftValue ) )
@@ -550,9 +542,7 @@ public sealed class Binding : IBinding
                 Schedule ( dependentExpr, this, _ =>
                 {
                     if ( dependentExpr.TryWrite ( leftValue, out var target, out var member ) )
-                        Callback ( dependentExpr, member, changeId );
-
-                    activeChangeIds.Remove ( changeId );
+                        Callback ( dependentExpr, member, leftValue );
                 } );
             }
         } );

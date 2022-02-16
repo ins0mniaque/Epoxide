@@ -5,11 +5,10 @@ using System.ComponentModel;
 
 namespace Epoxide;
 
-// TODO: MemberChangedCallback with changeId parameter
 public interface IMemberSubscriber
 {
-    IDisposable Subscribe ( object target, MemberInfo member, Action<int> k );
-    void Invalidate ( object target, MemberInfo member, int changeId = 0 );
+    IDisposable Subscribe ( object target, MemberInfo member, MemberChangedCallback callback );
+    void Invalidate ( object target, MemberInfo member );
 }
 
 public interface IMemberSubscriptionFactory
@@ -163,18 +162,17 @@ public class MemberSubscriber : IMemberSubscriber
     private class Entry
     {
         public MemberSubscription? Subscription;
-        public Action<int>? Action;
+        public MemberChangedCallback? Action;
     }
 
     readonly Dictionary<Tuple<Object, MemberInfo>, Entry> objectSubs =
         new Dictionary<Tuple<Object, MemberInfo>, Entry> ( );
 
-
     private sealed class Token : IDisposable
     {
         public MemberSubscriber me;
         public Entry MyClass;
-        public Action<int> Callback;
+        public MemberChangedCallback Callback;
 
         public void Dispose ( )
         {
@@ -192,7 +190,7 @@ public class MemberSubscriber : IMemberSubscriber
         }
     }
 
-    public IDisposable Subscribe ( object target, MemberInfo member, Action<int> k )
+    public IDisposable Subscribe ( object target, MemberInfo member, MemberChangedCallback k )
     {
         var key = Tuple.Create ( target, member );
         Entry subs;
@@ -210,18 +208,18 @@ public class MemberSubscriber : IMemberSubscriber
         return new Token { me = this, MyClass = subs, Callback = k };
     }
 
-    private void Callback ( object target, MemberInfo member )
+    public void Invalidate ( object target, MemberInfo member )
     {
-        Invalidate ( target, member, 0 );
+        Callback ( target, member );
     }
 
-    public void Invalidate ( object target, MemberInfo member, int changeId = 0 )
+    private void Callback ( object target, MemberInfo member )
     {
         var key = Tuple.Create ( target, member );
         if ( objectSubs.TryGetValue ( key, out var subs ) )
         {
             if ( subs.Action is { } a )
-                a ( changeId );
+                a ( target, member );
         }
     }
 }
