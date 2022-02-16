@@ -307,7 +307,6 @@ public sealed class Trigger
     }
 }
 
-// TODO: Store schedule disposables while scheduling
 public sealed class ExpressionSubscription : IDisposable
 {
     readonly IBinderServices services;
@@ -329,14 +328,16 @@ public sealed class ExpressionSubscription : IDisposable
         foreach ( var t in triggers )
         {
             t.Subscription?.Dispose ( );
-            t.Subscription = null;
-
-            services.Scheduler.Schedule ( t.Expression, t, t =>
-            {
-                if ( t.Expression.TryRead ( out var target ) )
-                    t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, changeid => callback ( target, t.Member, changeid ) );
-            } );
+            t.Subscription = services.Scheduler.Schedule ( t.Expression, t, ReadAndSubscribe ) ?? t.Subscription;
         }
+    }
+
+    private void ReadAndSubscribe ( Trigger t )
+    {
+        if ( t.Expression.TryRead ( out var target ) )
+            t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, changeid => callback ( target, t.Member, changeid ) );
+        else
+            t.Subscription = null;
     }
 
     public void Unsubscribe ( )
