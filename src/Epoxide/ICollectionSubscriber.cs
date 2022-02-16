@@ -32,7 +32,7 @@ public enum CollectionOperation
     Move,
     Replace,
     Clear,
-    Refresh
+    Invalidate
 }
 
 public sealed class CollectionChange < T >
@@ -89,9 +89,9 @@ public sealed class CollectionChange < T >
         return new ( CollectionOperation.Clear );
     }
 
-    public static CollectionChange < T > Refreshed ( )
+    public static CollectionChange < T > Invalidated ( )
     {
-        return new ( CollectionOperation.Refresh );
+        return new ( CollectionOperation.Invalidate );
     }
 
     private CollectionChange ( CollectionOperation operation, IReadOnlyList < T >? items = null, T? item = default, int index = -1, bool hasReplacedItem = false, T? replacedItem = default, int movedFromIndex = -1 )
@@ -272,13 +272,12 @@ public class CollectionSubscriber < T >
 
     private void Callback ( IEnumerable < T > collection, CollectionChange<T> change )
     {
-        Invalidate ( collection, 0 );
+        Notify ( collection, change, 0 );
     }
 
     public void Invalidate ( IEnumerable < T > collection, int changeId = 0 )
     {
-        Notify ( collection, CollectionChange < T >.Cleared ( ), changeId );
-        Notify ( collection, CollectionChange < T >.Added   ( (IEnumerable < T >) collection, 0 ), changeId );
+        Notify ( collection, CollectionChange < T >.Invalidated ( ), changeId );
     }
 
     private void Notify ( IEnumerable < T > collection, CollectionChange< T > change, int changeId = 0 )

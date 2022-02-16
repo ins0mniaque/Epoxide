@@ -264,7 +264,7 @@ public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumer
 
     public virtual IEnumerable<CollectionChange<TResult>> ProcessChanges ( IEnumerable<CollectionChange<TSource>> changes )
     {
-		yield return CollectionChange<TResult>.Refreshed ( );
+		yield return CollectionChange<TResult>.Invalidated ( );
     }
 
     public override void ReportChanges ( IBindableEnumerable enumerable, IEnumerable changes )
@@ -335,7 +335,7 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 		// TODO: Scheduling
 		void Callback ( int changeId )
         {
-			ReportChanges ( this, Enumerable.Repeat ( CollectionChange < T >.Refreshed ( ), 1 ) );
+			ReportChanges ( this, Enumerable.Repeat ( CollectionChange < T >.Invalidated ( ), 1 ) );
         }
 
 		return list.Where ( _compiledPredicate ).GetEnumerator ( );
