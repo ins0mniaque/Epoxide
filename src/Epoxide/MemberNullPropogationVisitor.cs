@@ -120,7 +120,16 @@ public class EnumerableToCollectionVisitor : ExpressionVisitor
 
 public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
 {
-    private static MethodInfo? asBindableMethod;
+    public EnumerableToBindableEnumerableVisitor ( ) { }
+    public EnumerableToBindableEnumerableVisitor ( Expression binding )
+    {
+        Binding = binding;
+    }
+
+    private Expression? Binding { get; }
+
+    private static MethodInfo? asBindableDefaultMethod;
+    private static MethodInfo? asBindableBindingMethod;
 
     protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
@@ -130,17 +139,34 @@ public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
             if ( queryableMethod == null )
                 return base.VisitMethodCall ( node );
 
-            asBindableMethod ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.AsBindable ) );
+            if ( Binding != null )
+            {
+                asBindableBindingMethod ??= new Func<IEnumerable<object>, IBinding, IBindableEnumerable<object>>(BindableEnumerable.AsBindable<object>).GetMethodInfo().GetGenericMethodDefinition();
 
-            var arg0 = Visit ( node.Arguments [ 0 ] );
+                var arg0 = Visit ( node.Arguments [ 0 ] );
 
-            var asBindable = asBindableMethod.MakeGenericMethod ( arg0.Type.GetGenericArguments ( ) [ 0 ] );
+                var asBindable = asBindableBindingMethod.MakeGenericMethod ( arg0.Type.GetGenericArguments ( ) [ 0 ] );
 
-            arg0 = typeof ( IBindableEnumerable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0 );
+                arg0 = typeof ( IBindableEnumerable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0, Binding );
 
-            var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Lambda ( a ) : a );
+                var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Lambda ( a ) : a );
 
-            return Expression.Call ( queryableMethod, arguments );
+                return Expression.Call ( queryableMethod, arguments );
+            }
+            else
+            {
+                asBindableDefaultMethod ??= new Func<IEnumerable<object>, IBindableEnumerable<object>>(BindableEnumerable.AsBindable<object>).GetMethodInfo().GetGenericMethodDefinition();
+
+                var arg0 = Visit ( node.Arguments [ 0 ] );
+
+                var asBindable = asBindableDefaultMethod.MakeGenericMethod ( arg0.Type.GetGenericArguments ( ) [ 0 ] );
+
+                arg0 = typeof ( IBindableEnumerable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0 );
+
+                var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Lambda ( a ) : a );
+
+                return Expression.Call ( queryableMethod, arguments );
+            }
         }
 
         return base.VisitMethodCall ( node );
@@ -173,7 +199,8 @@ public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
         var genericTypeCount = method.GetGenericArguments ( ).Length;
         var argumentTypes    = GetEnumerableMethodArgumentTypes ( method );
 
-        var bindableEnumerableMethod = bindableEnumerableMethods [ method.Name ].FirstOrDefault ( q => ( q.Method.ReturnType.IsGenericType || q.Method.ReturnType == method.ReturnType ) &&
+        var bindableEnumerableMethod = bindableEnumerableMethods [ method.Name ].FirstOrDefault ( q => ( q.Method.ReturnType.IsGenericType && ExprHelper.GetGenericInterfaceArguments ( q.Method.ReturnType, typeof(IEnumerable<>)) != null ||
+                                                                                                         q.Method.ReturnType == method.ReturnType ) &&
                                                                                                        q.GenericTypeCount == genericTypeCount &&
                                                                                                        q.ArgumentTypes.SequenceEqual ( argumentTypes ) );
         if ( bindableEnumerableMethod == null )

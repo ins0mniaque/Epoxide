@@ -345,15 +345,26 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 /// <summary>Provides a set of <see langword="static" /> (<see langword="Shared" /> in Visual Basic) methods for querying objects that implement <see cref="IBindableEnumerable`1" />.</summary>
 public static class BindableEnumerable
 {
+	// TODO: Use weak binder here
 	public static IBindableEnumerable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source)
+    {
+		return source.AsBindable ( Binder.Default.Bind ( ) );
+    }
+
+	public static IBindableEnumerable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source, out IBinding binding)
+    {
+		return source.AsBindable ( binding = Binder.Default.Bind ( ) );
+    }
+
+	public static IBindableEnumerable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source, IBinding binding)
     {
         if (source == null)
             throw Error.ArgumentNull(nameof(source));
 
-        if(source is IBindableEnumerable<TElement> bindable)
+        if(source is IBindableEnumerable<TElement> bindable && bindable.Binding == binding)
             return bindable;
 
-        return new BindableEnumerable<TElement>(Binder.Default.Bind(), source);
+        return new BindableEnumerable<TElement>(binding, source);
     }
 
 	// TODO: Remove extension and call directly in rewriter

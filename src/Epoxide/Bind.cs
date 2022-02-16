@@ -382,12 +382,14 @@ public sealed class Binding : IBinding
 
         Services = services;
 
+        var binding = Expression.Constant ( this );
+
         left = new EnumerableToCollectionVisitor         ( right.Type ).Visit ( left );
-        left = new EnumerableToBindableEnumerableVisitor ( )           .Visit ( left );
+        left = new EnumerableToBindableEnumerableVisitor ( binding )   .Visit ( left );
         left = new AggregateInvalidatorVisitor           ( )           .Visit ( left );
 
         right = new EnumerableToCollectionVisitor         ( left.Type ).Visit ( right );
-        right = new EnumerableToBindableEnumerableVisitor ( )          .Visit ( right );
+        right = new EnumerableToBindableEnumerableVisitor ( binding )  .Visit ( right );
         right = new AggregateInvalidatorVisitor           ( )          .Visit ( right );
 
         this.left  = left;
