@@ -315,13 +315,13 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 
 		_triggersSource ??= Trigger.ExtractTriggers ( _predicate.Body );
 
-		_triggers = list.Select ( _ => _triggersSource.Select ( t => new Trigger { Expression = t.Expression, Member = t.Member } ).ToList ( ) )
+		_triggers = list.Select ( _ => _triggersSource.Select ( t => new Trigger { Accessor = t.Accessor, Member = t.Member } ).ToList ( ) )
 						.ToList ( );
 
 		for ( var t = 0; t < _triggersSource.Count; t++ )
         {
 			var trigger = _triggersSource [ t ];
-			var c = CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert(trigger.Expression, typeof(object)), _predicate.Parameters ) );
+			var c = CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert(trigger.Accessor.Expression, typeof(object)), _predicate.Parameters ) );
 
 			for ( var index = 0; index < list.Count; index++ )
 				_triggers [ index ] [ t ].Subscription = Binding.Services.MemberSubscriber.Subscribe ( c ( list [ index ] ), trigger.Member, Callback );

@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -170,41 +171,82 @@ public interface IScheduler
     IDisposable? Schedule < TState > ( Expression expression, TState state, Action < TState > action );
 }
 
-public static class ExpressionMember
+public abstract class ExpressionAccessor
 {
-    // TODO: Cache sentinel propagated expressions 
-    public static bool TryRead ( this Expression expr, out object? value )
+    public static ExpressionAccessor Create ( Expression expression )
     {
-        var coalescing = expr.AddSentinel ( );
+        if ( ExprHelper.IsWritable ( expression ) )
+            return new Writable ( expression );
 
-        value = CachedExpressionCompiler.Evaluate ( coalescing );
-
-        return value != Sentinel.Value;
+        return new Readable ( expression );
     }
 
-    public static bool TryWrite ( this Expression expr, object? value, out object target, out MemberInfo member )
+    protected ExpressionAccessor ( Expression expression )
     {
-        if ( expr.NodeType != ExpressionType.MemberAccess )
-            throw new ArgumentException ( "Expression must be of type MemberAccess" );
+        Expression = expression;
+    }
 
-        var m = (MemberExpression) expr;
+    public Expression Expression { get; }
 
-        member = m.Member;
+    // NOTE: Expressions are always readable...
+    public abstract bool CanRead  { get; }
+    public abstract bool CanWrite { get; }
 
-        var coalescing = m.Expression.AddSentinel ( );
+    public abstract bool TryRead  ( out object? value );
+    public abstract bool TryWrite ( object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member );
 
-        target = CachedExpressionCompiler.Evaluate ( coalescing );
-        if ( target == null || target == Sentinel.Value )
-            return false;
+    public static implicit operator Expression ( ExpressionAccessor accessor ) => accessor.Expression;
 
-        member.SetValue ( target, value );
+    private class Readable : ExpressionAccessor
+    {
+        public Readable ( Expression expression ) : base ( expression ) { }
 
-        return true;
+        private Expression? sentinelExpression;
+        public  Expression  SentinelExpression => sentinelExpression ??= Expression.AddSentinel ( );
+
+        public override bool CanRead  => true;
+        public override bool CanWrite => false;
+
+        // TODO: Cache compilation
+        public override bool TryRead ( out object? value )
+        {
+            value = CachedExpressionCompiler.Evaluate ( SentinelExpression );
+
+            return value != Sentinel.Value;
+        }
+
+        public override bool TryWrite ( object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
+        {
+            throw new InvalidOperationException ( $"Expression { Expression } is not writable." );
+        }
+    }
+
+    private class Writable : Readable
+    {
+        public Writable ( Expression expression ) : base ( expression ) { }
+
+        private Expression? targetSentinelExpression;
+
+        public override bool CanWrite => true;
+
+        // TODO: Cache compilation
+        public override bool TryWrite ( object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
+        {
+            targetSentinelExpression ??= ( (MemberExpression) Expression ).Expression.AddSentinel ( );
+
+            member = ( (MemberExpression) Expression ).Member;
+            target = CachedExpressionCompiler.Evaluate ( targetSentinelExpression );
+            if ( target == null || target == Sentinel.Value )
+                return false;
+
+            member.SetValue ( target, value );
+
+            return true;
+        }
     }
 }
 
-
-
+// TODO: Refactor to avoid parsing expression on each call to find the right scheduler
 public class NoScheduler : IScheduler
 {
     public IDisposable? Schedule < TState > ( Expression expression, TState state, Action < TState > action )
@@ -214,8 +256,6 @@ public class NoScheduler : IScheduler
         return null;
     }
 }
-
-
 
 public static class DefaultBinder
 {
@@ -263,7 +303,7 @@ public static class DefaultBinder
 // Internal
 public sealed class Trigger
 {
-    public Expression Expression;
+    public ExpressionAccessor Accessor;
     public MemberInfo Member;
     public IDisposable? Subscription;
 
@@ -284,7 +324,7 @@ public sealed class Trigger
         {
             Visit ( node.Expression );
 
-            Triggers.Add ( new Trigger {Expression = node.Expression, Member = node.Member} );
+            Triggers.Add ( new Trigger { Accessor = ExpressionAccessor.Create ( node.Expression ), Member = node.Member } );
 
             return node;
         }
@@ -312,13 +352,13 @@ public sealed class ExpressionSubscription : IDisposable
         foreach ( var t in triggers )
         {
             t.Subscription?.Dispose ( );
-            t.Subscription = services.Scheduler.Schedule ( t.Expression, t, ReadAndSubscribe ) ?? t.Subscription;
+            t.Subscription = services.Scheduler.Schedule ( t.Accessor.Expression, t, ReadAndSubscribe ) ?? t.Subscription;
         }
     }
 
     private void ReadAndSubscribe ( Trigger t )
     {
-        if ( t.Expression.TryRead ( out var target ) && target != null )
+        if ( t.Accessor.TryRead ( out var target ) && target != null )
             t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, callback );
         else
             t.Subscription = null;
@@ -336,15 +376,9 @@ public sealed class ExpressionSubscription : IDisposable
     public void Dispose ( ) => Unsubscribe ( );
 }
 
-// TODO: Cache or reuse rewritten expressions in scheduler
 public sealed class Binding : IBinding
 {
     readonly CompositeDisposable disposables;
-
-    object? Value;
-
-    readonly Expression left;
-    readonly Expression right;
 
     readonly bool isReadOnlyCollection;
 
@@ -362,27 +396,6 @@ public sealed class Binding : IBinding
 
         Services = services;
 
-        if ( ExprHelper.IsWritable ( right ) && ! ExprHelper.IsWritable ( left ) )
-        {
-            var rightToLeft = left;
-
-            left  = right;
-            right = rightToLeft;
-        }
-
-        isReadOnlyCollection = ExprHelper.IsReadOnlyCollection ( left );
-
-        if ( ! isReadOnlyCollection && ! ExprHelper.IsWritable ( left ) )
-        {
-            // TODO: BindingException + nicer Expression.ToString ( )
-            if ( left.NodeType == ExpressionType.Convert && left.Type == right.Type && ExprHelper.IsWritable ( ( (UnaryExpression) left ).Operand ) )
-                throw new ArgumentException ( $"Cannot assign { left.Type } to { ( (UnaryExpression) left ).Operand.Type }" );
-            else if ( right.NodeType == ExpressionType.Convert && right.Type == left.Type && ExprHelper.IsWritable ( ( (UnaryExpression) right ).Operand ) )
-                throw new ArgumentException ( $"Cannot assign { right.Type } to { ( (UnaryExpression) right ).Operand.Type }" );
-            
-            throw new ArgumentException ( $"Neither side is writable { left } == { right }" );
-        }
-
         var binding = Expression.Constant ( this );
 
         left = new EnumerableToCollectionVisitor         ( right.Type ).Visit ( left );
@@ -393,28 +406,63 @@ public sealed class Binding : IBinding
         right = new EnumerableToBindableEnumerableVisitor ( binding )  .Visit ( right );
         right = new AggregateInvalidatorVisitor           ( )          .Visit ( right );
 
-        this.left  = left;
-        this.right = right;
+        this.Left  = ExpressionAccessor.Create ( left );
+        this.Right = ExpressionAccessor.Create ( right );
 
-        disposables.Add ( leftSub  = CreateSubscription ( left, right ) );
-        disposables.Add ( rightSub = CreateSubscription ( right, left ) );
+        // TODO: Avoid swapping
+        if ( this.Right.CanWrite && ! this.Left.CanWrite )
+        {
+            var rightToLeft = this.Left;
+
+            this.Left  = this.Right;
+            this.Right = rightToLeft;
+        }
+
+        isReadOnlyCollection = ExprHelper.IsReadOnlyCollection ( left );
+
+        if ( ! isReadOnlyCollection && ! this.Left.CanWrite )
+        {
+            // TODO: BindingException + nicer Expression.ToString ( )
+            if ( left.NodeType == ExpressionType.Convert && left.Type == right.Type && ExprHelper.IsWritable ( ( (UnaryExpression) left ).Operand ) )
+                throw new ArgumentException ( $"Cannot assign { left.Type } to { ( (UnaryExpression) left ).Operand.Type }" );
+            else if ( right.NodeType == ExpressionType.Convert && right.Type == left.Type && ExprHelper.IsWritable ( ( (UnaryExpression) right ).Operand ) )
+                throw new ArgumentException ( $"Cannot assign { right.Type } to { ( (UnaryExpression) right ).Operand.Type }" );
+            
+            throw new ArgumentException ( $"Neither side is writable { left } == { right }" );
+        }
+
+        disposables.Add ( leftSub  = CreateSubscription ( Left  ) );
+        disposables.Add ( rightSub = CreateSubscription ( Right ) );
         disposables.Add ( leftContainer  = new CompositeDisposable ( ) );
         disposables.Add ( rightContainer = new CompositeDisposable ( ) );
     }
 
-    public IBinderServices Services { get; }
+    public IBinderServices    Services { get; }
+    public ExpressionAccessor Left     { get; }
+    public ExpressionAccessor Right    { get; }
+    public object?            Value    { get; private set; }
 
     public void Bind ( )
     {
         if ( isReadOnlyCollection )
         {
-            Schedule ( left, (object?) null, ReadAndBindCollection );
+            Schedule ( Left.Expression, (object?) null, ReadThenBindCollection );
         }
         else
         {
-            Schedule ( right, (object?) null, ReadAndWrite );
+            Schedule ( Right.Expression, Right, ReadThenWrite );
         }
     }
+
+    public void Unbind ( )
+    {
+        leftSub .Unsubscribe ( );
+        rightSub.Unsubscribe ( );
+    }
+
+    public void Attach  ( IDisposable disposable ) => ( activeContainer ?? disposables ).Add ( disposable );
+    public bool Detach  ( IDisposable disposable ) => leftContainer.Remove ( disposable ) || rightContainer.Remove ( disposable ) || disposables.Remove ( disposable );
+    public void Dispose ( )                        => disposables.Dispose ( );
 
     private void Schedule < TState > ( Expression expression, TState state, Action < TState > action )
     {
@@ -434,77 +482,59 @@ public sealed class Binding : IBinding
         }
     }
 
-    private bool TryRead ( Expression expression, out object? value )
+    private bool TryRead ( ExpressionAccessor expression, out object? value )
     {
-        if      ( expression == left  ) activeContainer = leftContainer;
-        else if ( expression == right ) activeContainer = rightContainer;
+        if      ( expression == Left  ) activeContainer = leftContainer;
+        else if ( expression == Right ) activeContainer = rightContainer;
         else                            activeContainer = null;
 
         activeContainer?.Clear ( );
 
         var read = expression.TryRead ( out value );
 
+        if      ( expression == Left  ) leftSub .Subscribe ( );
+        else if ( expression == Right ) rightSub.Subscribe ( );
+
         activeContainer = null;
 
         return read;
     }
 
-    private void ReadAndWrite ( object? state )
+    private void ReadThenWrite ( ExpressionAccessor expression )
     {
-        if ( ! TryRead ( right, out var rightValue ) )
-        {
-            leftSub .Subscribe ( );
-            rightSub.Subscribe ( );
-
+        if ( ! TryRead ( expression, out var value ) )
             return;
-        }
 
-        Schedule ( left, rightValue, Write );
+        var otherSide = expression == Left ? Right : Left;
+
+        Schedule ( otherSide.Expression, (otherSide, value), Write );
     }
 
-    private void Write ( object? leftValue )
+    private void Write ( (ExpressionAccessor Expression, object? Value) expressionAndValue )
     {
-        if ( ! left.TryWrite ( leftValue, out var target, out var member ) )
-            Callback ( left, member, leftValue );
+        if ( expressionAndValue.Expression.TryWrite ( expressionAndValue.Value, out var target, out var member ) )
+            Callback ( expressionAndValue.Expression.Expression, member, expressionAndValue );
 
-        leftSub .Subscribe ( );
-        rightSub.Subscribe ( );
+        if      ( expressionAndValue.Expression == Left  ) leftSub .Subscribe ( );
+        else if ( expressionAndValue.Expression == Right ) rightSub.Subscribe ( );
     }
 
-    private void ReadAndBindCollection ( object? state )
+    private void ReadThenBindCollection ( object? state )
     {
-        if ( ! TryRead ( left, out var leftValue ) || leftValue == null )
-        {
-            leftSub .Subscribe ( );
-            rightSub.Subscribe ( );
-
+        if ( ! TryRead ( Left, out var leftValue ) || leftValue == null )
             return;
-        }
 
-        Schedule ( right, leftValue, BindCollection );
+        Schedule ( Right.Expression, leftValue, BindCollection );
     }
 
     private void BindCollection ( object leftValue )
     {
-        if ( ! TryRead ( right, out var rightValue ) )
+        if ( ! TryRead ( Right, out var rightValue ) )
             return;
 
         if ( Services.CollectionSubscriber.BindCollections ( leftValue, rightValue ) is { } binding )
             rightContainer.Add ( binding );
-
-        leftSub .Subscribe ( );
-        rightSub.Subscribe ( );
     }
-
-    public void Unbind ( )
-    {
-        leftSub .Unsubscribe ( );
-        rightSub.Unsubscribe ( );
-    }
-
-    public void Attach  ( IDisposable disposable ) => ( activeContainer ?? disposables ).Add ( disposable );
-    public bool Detach  ( IDisposable disposable ) => leftContainer.Remove ( disposable ) || rightContainer.Remove ( disposable ) || disposables.Remove ( disposable );
-    public void Dispose ( )                        => disposables.Dispose ( );
 
     private void Callback ( Expression expression, MemberInfo member, object? value )
     {
@@ -512,25 +542,12 @@ public sealed class Binding : IBinding
             Services.MemberSubscriber.Invalidate ( expression, member );
     }
 
-    ExpressionSubscription CreateSubscription ( Expression expr, Expression dependentExpr )
+    private ExpressionSubscription CreateSubscription ( ExpressionAccessor accessor )
     {
         if ( isReadOnlyCollection )
-            return new ExpressionSubscription ( Services, expr, (o, m) => Schedule ( left, (object?) null, ReadAndBindCollection ) );
+            return new ExpressionSubscription ( Services, accessor.Expression, (o, m) => Schedule ( Left.Expression, (object?) null, ReadThenBindCollection ) );
 
-        return new ExpressionSubscription ( Services, expr, (o, m) =>
-        {
-            Schedule ( expr, (object?) null, _ =>
-            {
-                if ( TryRead ( expr, out var leftValue ) )
-                {
-                    Schedule ( dependentExpr, (object?) null, _ =>
-                    {
-                        if ( dependentExpr.TryWrite ( leftValue, out var target, out var member ) )
-                            Callback ( dependentExpr, member, leftValue );
-                    } );
-                }
-            } );
-        } );
+        return new ExpressionSubscription ( Services, accessor.Expression, (o, m) => Schedule ( accessor.Expression, accessor, ReadThenWrite ) );
     }
 }
 
