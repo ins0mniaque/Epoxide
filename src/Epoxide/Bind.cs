@@ -107,6 +107,7 @@ public interface IBinding : IDisposable
     bool Detach ( IDisposable disposable );
 }
 
+// TODO: Merge all helper methods as extensions
 public static class ExprHelper
 {
     public static bool IsWritable ( Expression expr )
@@ -171,31 +172,14 @@ public interface IScheduler
 
 public static class ExpressionMember
 {
-    // TODO: Find a way to avoid second read
     // TODO: Cache sentinel propagated expressions 
     public static bool TryRead ( this Expression expr, out object? value )
     {
-        var coalescing = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( expr );
+        var coalescing = expr.AddSentinel ( );
+
         value = CachedExpressionCompiler.Evaluate ( coalescing );
 
-        if ( value == SentinelPropogationVisitor.Sentinel )
-        {
-            if ( expr is MemberExpression mmm )
-                expr = mmm.Expression;
-            else if ( expr is MethodCallExpression ccc )
-                expr = ccc.Object;
-
-            if ( expr is MemberExpression or MethodCallExpression )
-            {
-                expr = new MemberNullPropogationVisitor ( ).Visit ( expr );
-                if ( CachedExpressionCompiler.Evaluate ( expr ) == null )
-                    return false;
-            }
-
-            value = null;
-        }
-
-        return value != SentinelPropogationVisitor.Sentinel;
+        return value != Sentinel.Value;
     }
 
     public static bool TryWrite ( this Expression expr, object? value, out object target, out MemberInfo member )
@@ -207,10 +191,10 @@ public static class ExpressionMember
 
         member = m.Member;
 
-        var anotherExpr = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( m.Expression );
+        var coalescing = m.Expression.AddSentinel ( );
 
-        target = CachedExpressionCompiler.Evaluate ( anotherExpr ) ?? SentinelPropogationVisitor.Sentinel;
-        if ( target == SentinelPropogationVisitor.Sentinel )
+        target = CachedExpressionCompiler.Evaluate ( coalescing );
+        if ( target == null || target == Sentinel.Value )
             return false;
 
         member.SetValue ( target, value );
@@ -267,8 +251,8 @@ public static class DefaultBinder
         if ( expression.NodeType == ExpressionType.MemberAccess )
         {
             var m = (MemberExpression) expression;
-            var x = new SentinelPropogationVisitor ( ).VisitAndAddSentinelSupport ( m.Expression );
-            if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != SentinelPropogationVisitor.Sentinel )
+            var x = m.Expression.AddSentinel ( );
+            if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != Sentinel.Value )
                 services.MemberSubscriber.Invalidate ( obj, m.Member );
         }
         else
@@ -334,7 +318,7 @@ public sealed class ExpressionSubscription : IDisposable
 
     private void ReadAndSubscribe ( Trigger t )
     {
-        if ( t.Expression.TryRead ( out var target ) )
+        if ( t.Expression.TryRead ( out var target ) && target != null )
             t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, callback );
         else
             t.Subscription = null;
@@ -387,6 +371,17 @@ public sealed class Binding : IBinding
         }
 
         isReadOnlyCollection = ExprHelper.IsReadOnlyCollection ( left );
+
+        if ( ! isReadOnlyCollection && ! ExprHelper.IsWritable ( left ) )
+        {
+            // TODO: BindingException + nicer Expression.ToString ( )
+            if ( left.NodeType == ExpressionType.Convert && left.Type == right.Type && ExprHelper.IsWritable ( ( (UnaryExpression) left ).Operand ) )
+                throw new ArgumentException ( $"Cannot assign { left.Type } to { ( (UnaryExpression) left ).Operand.Type }" );
+            else if ( right.NodeType == ExpressionType.Convert && right.Type == left.Type && ExprHelper.IsWritable ( ( (UnaryExpression) right ).Operand ) )
+                throw new ArgumentException ( $"Cannot assign { right.Type } to { ( (UnaryExpression) right ).Operand.Type }" );
+            
+            throw new ArgumentException ( $"Neither side is writable { left } == { right }" );
+        }
 
         var binding = Expression.Constant ( this );
 

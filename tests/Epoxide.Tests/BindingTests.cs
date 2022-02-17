@@ -134,6 +134,46 @@ public class BindingTests
     }
 
     [ Fact ]
+    public void Nullable ( )
+    {
+        var left  = (TestObject?) null;
+        var right = (int?) -1;
+
+        DefaultBinder.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right );
+
+        Assert.Equal ( right, null );
+
+        right = -1;
+
+        DefaultBinder.Bind ( ( ) => left.State                     == right );
+        DefaultBinder.Bind ( ( ) => left.ToString ( ).Length       == right );
+        DefaultBinder.Bind ( ( ) => left.State.ToString ( ).Length == right );
+
+        Assert.Equal ( right, -1 );
+    }
+
+    [ Fact ]
+    public void ValueType ( )
+    {
+        var left   = (TestObject?) null;
+        var right  = (int) -1;
+
+        DefaultBinder.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? 42 ) == right );
+
+        Assert.Equal ( right, 42 );
+
+        right = -1;
+
+        Assert.Throws < ArgumentException > ( ( ) => DefaultBinder.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right ) );
+
+        DefaultBinder.Bind ( ( ) => left.State                     == right );
+        DefaultBinder.Bind ( ( ) => left.ToString ( ).Length       == right );
+        DefaultBinder.Bind ( ( ) => left.State.ToString ( ).Length == right );
+
+        Assert.Equal ( right, -1 );
+    }
+
+    [ Fact ]
     public void Aggregate ( )
     {
         var left  = -1;

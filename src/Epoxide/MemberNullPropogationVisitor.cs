@@ -1,73 +1,32 @@
+using System.Runtime.CompilerServices;
 using System.Linq.Expressions;
 using System.Reflection;
 
 namespace Epoxide;
 
-public class SentinelPropogationVisitor : MemberNullPropogationVisitor
+public static class Sentinel
 {
-    public static object Sentinel { get; } = new ( );
+    public static object Value { get; } = new SentinelObject ( );
 
-    public Expression VisitAndAddSentinelSupport ( Expression node )
+    public static Expression AddSentinel ( this Expression node )
     {
-        var x = Visit ( node );
+        node = nullPropagationVisitor.Visit ( node );
 
-        // NOTE: Remove right part check?
-        if ( node.NodeType == ExpressionType.Coalesce && ((BinaryExpression)node).Right is ConstantExpression e && e.Value == null )
-            return x;
-
-        if ( x.Type != typeof(object))
-            x = Expression.Convert ( x, typeof(object) );
-        return Expression.Coalesce ( x, Expression.Constant (Sentinel ) );
-    }
-
-    protected override Expression VisitBinary ( BinaryExpression node )
-    {
-        if ( node.NodeType == ExpressionType.Coalesce && node.Right is ConstantExpression e && e.Value == null )
-            return new MemberNullPropogationVisitor ( ).Visit ( node.Left );
-
-        return base.VisitBinary ( node );
-    }
-}
-
-public class MemberNullPropogationVisitor : ExpressionVisitor
-{
-    protected override Expression VisitLambda < T > ( Expression < T > node ) => node;
-
-    protected override Expression VisitMember(MemberExpression node)
-    {
-        if (node.Expression == null || !IsNullable(node.Expression.Type))
-            return base.VisitMember(node);
-
-        var expression = base.Visit(node.Expression);
-        var nullBaseExpression = Expression.Constant(null, expression.Type);
-        var test = Expression.ReferenceEqual(expression, nullBaseExpression);
-        var outputType = node.Type;
-        if (!IsNullable ( outputType ))
-        {
-            outputType = typeof(Nullable<>).MakeGenericType(outputType);
-            return Expression.Condition(test, Expression.Constant(null, outputType), Expression.Convert(node,outputType));
-        }
-        return Expression.Condition(test, Expression.Constant(null, outputType), node);
-    }
-
-    protected override Expression VisitMethodCall(MethodCallExpression node)
-    {
-        if (node.Object == null || !IsNullable(node.Object.Type))
-        {
-            Visit ( node.Object );
+        if ( node.NodeType == ExpressionType.Coalesce && ((BinaryExpression)node).Right is ConstantExpression )
             return node;
-        }
 
-        var expression = base.Visit(node.Object);
-        var nullBaseExpression = Expression.Constant(null, expression.Type);
-        var test = Expression.Equal(expression, nullBaseExpression);
-        var outputType = node.Type;
-        if (!IsNullable ( outputType ))
-        {
-            outputType = typeof(Nullable<>).MakeGenericType(outputType);
-            return Expression.Condition(test, Expression.Constant(null, outputType), Expression.Convert(node,outputType));
-        }
-        return Expression.Condition(test, Expression.Constant(null, outputType), node);
+        if ( ! IsNullable ( node.Type ) || node.NodeType == ExpressionType.MemberAccess && IsClosure ( ( (MemberExpression) node ).Expression ) )
+            return node;
+
+        if ( node.Type != typeof(object))
+            node = Expression.Convert ( (Expression) node, typeof(object) );
+
+        return Expression.Coalesce ( (Expression) node, Expression.Constant ( Value ) );
+    }
+
+    private static bool IsClosure ( Expression ex )
+    {
+        return Attribute.IsDefined ( ex.Type, typeof ( CompilerGeneratedAttribute ) );
     }
 
     private static bool IsNullable(Type type)
@@ -76,6 +35,138 @@ public class MemberNullPropogationVisitor : ExpressionVisitor
             return true;
         return type.IsGenericType &&
             type.GetGenericTypeDefinition() == typeof(Nullable<>);
+    }
+
+    private static readonly NullPropagationVisitor nullPropagationVisitor = new ( );
+
+    private class SentinelObject
+    {
+        public override string ToString ( ) => '{' + nameof ( Sentinel ) + '}';
+    }
+}
+
+// TODO: Fix simple field accesses being transformed in variables
+public class NullPropagationVisitor : ExpressionVisitor
+{
+    protected override Expression VisitUnary(UnaryExpression propertyAccess)
+    {
+        if (propertyAccess.Operand is MemberExpression mem)
+            return VisitMember(mem);
+
+        if (propertyAccess.Operand is MethodCallExpression met)
+            return VisitMethodCall(met);
+
+        if (propertyAccess.Operand is ConditionalExpression cond)
+            return Expression.Condition(
+                    test: cond.Test,
+                    ifTrue: MakeNullable(Visit(cond.IfTrue)),
+                    ifFalse: MakeNullable(Visit(cond.IfFalse)));
+
+        if (propertyAccess.Operand is LambdaExpression)
+            return propertyAccess;
+
+        return base.VisitUnary(propertyAccess);
+    }
+
+    protected override Expression VisitBinary ( BinaryExpression node )
+    {
+        if ( node.NodeType == ExpressionType.Coalesce )
+            return Expression.Coalesce ( MakeNullable(Visit(node.Left)),
+                                         MakeNullable(Visit(node.Right)) );
+
+        return base.VisitBinary ( node );
+    }
+
+    protected override Expression VisitMember(MemberExpression propertyAccess)
+    {
+        if ( IsClosure ( propertyAccess.Expression ) )
+            return base.VisitMember ( propertyAccess );
+
+        return PropagateNull(propertyAccess.Expression, propertyAccess);
+    }
+
+    protected override Expression VisitMethodCall(MethodCallExpression propertyAccess)
+    {
+        if (propertyAccess.Object == null)
+            return base.VisitMethodCall(propertyAccess);
+
+        return PropagateNull(propertyAccess.Object, propertyAccess);
+    }
+
+    private BlockExpression PropagateNull(Expression instance, Expression propertyAccess)
+    {
+        var safe = base.Visit(instance);
+        var caller = Expression.Variable(safe.Type, "caller");
+        var assign = Expression.Assign(caller, safe);
+        var acess = MakeNullable(new ExpressionReplacer(instance,
+            IsNullableStruct(instance) ? caller : RemoveNullable(caller)).Visit(propertyAccess));
+        var ternary = Expression.Condition(
+                    test: Expression.Equal(caller, Expression.Constant(null)),
+                    ifTrue: Expression.Constant(null, acess.Type),
+                    ifFalse: acess);
+
+        return Expression.Block(
+            type: acess.Type,
+            variables: new[]
+            {
+                caller,
+            },
+            expressions: new Expression[]
+            {
+                assign,
+                ternary,
+            });
+    }
+
+    private static bool IsClosure ( Expression ex )
+    {
+        return Attribute.IsDefined ( ex.Type, typeof ( CompilerGeneratedAttribute ) );
+    }
+
+    private static Expression MakeNullable(Expression ex)
+    {
+        if (IsNullable(ex))
+            return ex;
+
+        return Expression.Convert(ex, typeof(Nullable<>).MakeGenericType(ex.Type));
+    }
+
+    private static bool IsNullable(Expression ex)
+    {
+        return !ex.Type.IsValueType || (Nullable.GetUnderlyingType(ex.Type) != null);
+    }
+
+    private static bool IsNullableStruct(Expression ex)
+    {
+        return ex.Type.IsValueType && (Nullable.GetUnderlyingType(ex.Type) != null);
+    }
+
+    private static Expression RemoveNullable(Expression ex)
+    {
+        if (IsNullableStruct(ex))
+            return Expression.Convert(ex, ex.Type.GenericTypeArguments[0]);
+
+        return ex;
+    }
+
+    private class ExpressionReplacer : ExpressionVisitor
+    {
+        private readonly Expression _oldEx;
+        private readonly Expression _newEx;
+
+        internal ExpressionReplacer(Expression oldEx, Expression newEx)
+        {
+            _oldEx = oldEx;
+            _newEx = newEx;
+        }
+
+        public override Expression Visit(Expression node)
+        {
+            if (node == _oldEx)
+                return _newEx;
+
+            return base.Visit(node);
+        }
     }
 }
 
