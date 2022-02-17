@@ -1,14 +1,14 @@
+using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Diagnostics;
-using System.ComponentModel;
 
 namespace Epoxide;
 
 public interface IMemberSubscriber
 {
-    IDisposable Subscribe ( object target, MemberInfo member, MemberChangedCallback callback );
-    void Invalidate ( object target, MemberInfo member );
+    IDisposable Subscribe  ( object target, MemberInfo member, MemberChangedCallback callback );
+    void        Invalidate ( object target, MemberInfo member );
 }
 
 public interface IMemberSubscriptionFactory
@@ -83,7 +83,7 @@ public sealed class GenericEventMemberSubscription : MemberSubscription
         eventHandler = null;
     }
 
-    void HandleAnyEvent ( object sender, EventArgs e )
+    void HandleAnyEvent ( object? sender, EventArgs e )
     {
         Callback ( Target, Member );
     }
@@ -152,74 +152,66 @@ public sealed class GenericEventMemberSubscription : MemberSubscription
 
 public class MemberSubscriber : IMemberSubscriber
 {
-    private readonly IMemberSubscriptionFactory factory;
+    private readonly ConcurrentDictionary < (object, MemberInfo), Entry > entries = new ( );
+    private readonly IMemberSubscriptionFactory                           factory;
 
     public MemberSubscriber ( IMemberSubscriptionFactory factory )
     {
         this.factory = factory;
     }
 
-    private class Entry
+    public IDisposable Subscribe ( object target, MemberInfo member, MemberChangedCallback callback )
     {
-        public MemberSubscription? Subscription;
-        public MemberChangedCallback? Action;
+        var key   = (target, member);
+        var entry = entries.GetOrAdd ( key, _ => new ( ) );
+        var token = new Token { Subscriber = this, Key = key, Entry = entry, Callback = callback };
+
+        entry.Subscription ??= factory.Create ( target, member, entry.SubscriptionCallback );
+        entry.Callback      += callback;
+
+        return token;
     }
 
-    readonly Dictionary<Tuple<Object, MemberInfo>, Entry> objectSubs =
-        new Dictionary<Tuple<Object, MemberInfo>, Entry> ( );
+    public void Invalidate ( object target, MemberInfo member )
+    {
+        if ( entries.TryGetValue ( (target, member), out var entry ) && entry.Callback is { } callback )
+            callback ( target, member );
+    }
+
+    private class Entry
+    {
+        public MemberSubscription?    Subscription;
+        public MemberChangedCallback? Callback;
+
+        public void SubscriptionCallback ( object target, MemberInfo member )
+        {
+            Callback?.Invoke ( target, member );
+        }
+    }
 
     private sealed class Token : IDisposable
     {
-        public MemberSubscriber me;
-        public Entry MyClass;
+        public MemberSubscriber      Subscriber;
+        public (object, MemberInfo)  Key;
+        public Entry                 Entry;
         public MemberChangedCallback Callback;
 
         public void Dispose ( )
         {
-            me.Remove ( this );
+            Subscriber.Remove ( this );
         }
     }
 
     private void Remove ( Token token )
     {
-        token.MyClass.Action -= token.Callback;
-        if ( token.MyClass.Action == null )
+        token.Entry.Callback -= token.Callback;
+
+        if ( token.Entry.Callback == null )
         {
-            token.MyClass.Subscription?.Dispose ( );
-            token.MyClass.Subscription = null;
-        }
-    }
+            token.Entry.Subscription?.Dispose ( );
+            token.Entry.Subscription = null;
 
-    public IDisposable Subscribe ( object target, MemberInfo member, MemberChangedCallback k )
-    {
-        var key = Tuple.Create ( target, member );
-        Entry subs;
-        if ( !objectSubs.TryGetValue ( key, out subs ) )
-        {
-            subs = new Entry ( );
-            objectSubs.Add ( key, subs );
-        }
-
-        if ( subs.Action == null )
-            subs.Subscription = factory.Create ( target, member, Callback );
-
-        subs.Action += k;
-
-        return new Token { me = this, MyClass = subs, Callback = k };
-    }
-
-    public void Invalidate ( object target, MemberInfo member )
-    {
-        Callback ( target, member );
-    }
-
-    private void Callback ( object target, MemberInfo member )
-    {
-        var key = Tuple.Create ( target, member );
-        if ( objectSubs.TryGetValue ( key, out var subs ) )
-        {
-            if ( subs.Action is { } a )
-                a ( target, member );
+            entries.TryRemove ( token.Key, out var _ );
         }
     }
 }

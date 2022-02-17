@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.ComponentModel;
 
@@ -211,75 +212,66 @@ public class CollectionSubscriber : ICollectionSubscriber
 
 public class CollectionSubscriber < T >
 {
-    private readonly ICollectionSubscriptionFactory factory;
+    private readonly ConcurrentDictionary < IEnumerable < T >, Entry > entries = new ( );
+    private readonly ICollectionSubscriptionFactory                    factory;
 
     public CollectionSubscriber ( ICollectionSubscriptionFactory factory )
     {
         this.factory = factory;
     }
 
-    private class Entry
+    public IDisposable Subscribe ( IEnumerable < T > collection, CollectionChangedCallback < T > callback )
     {
-        public CollectionSubscription< T >? Subscription;
-        public CollectionChangedCallback < T >? Action;
+        var key   = collection;
+        var entry = entries.GetOrAdd ( key, _ => new ( ) );
+        var token = new Token { Subscriber = this, Key = key, Entry = entry, Callback = callback };
+
+        entry.Subscription ??= factory.Create < T > ( collection, entry.SubscriptionCallback );
+        entry.Callback      += callback;
+
+        return token;
     }
 
-    readonly Dictionary<IEnumerable < T >, Entry> collectionSubs =
-        new Dictionary<IEnumerable < T >, Entry> ( );
+    public void Invalidate ( IEnumerable < T > collection )
+    {
+        if ( entries.TryGetValue ( collection, out var entry ) && entry.Callback is { } callback )
+            callback ( collection, CollectionChange < T >.Invalidated ( ) );
+    }
 
+    private class Entry
+    {
+        public CollectionSubscription    < T >? Subscription;
+        public CollectionChangedCallback < T >? Callback;
+
+        public void SubscriptionCallback ( IEnumerable < T > collection, CollectionChange < T > change )
+        {
+            Callback?.Invoke ( collection, change );
+        }
+    }
 
     private sealed class Token : IDisposable
     {
-        public CollectionSubscriber<T> me;
-        public Entry MyClass;
+        public CollectionSubscriber < T >      Subscriber;
+        public IEnumerable < T >               Key;
+        public Entry                           Entry;
         public CollectionChangedCallback < T > Callback;
 
         public void Dispose ( )
         {
-            me.Remove ( this );
+            Subscriber.Remove ( this );
         }
     }
 
     private void Remove ( Token token )
     {
-        token.MyClass.Action -= token.Callback;
-        if ( token.MyClass.Action == null )
+        token.Entry.Callback -= token.Callback;
+
+        if ( token.Entry.Callback == null )
         {
-            token.MyClass.Subscription?.Dispose ( );
-            token.MyClass.Subscription = null;
-        }
-    }
+            token.Entry.Subscription?.Dispose ( );
+            token.Entry.Subscription = null;
 
-    public IDisposable Subscribe ( IEnumerable < T > collection, CollectionChangedCallback < T > k )
-    {
-        var key = collection;
-        Entry subs;
-        if ( !collectionSubs.TryGetValue ( key, out subs ) )
-        {
-            subs = new Entry ( );
-            collectionSubs.Add ( key, subs );
-        }
-
-        if ( subs.Action == null )
-            subs.Subscription = factory.Create< T > ( collection, Callback );
-
-        subs.Action += k;
-
-        return new Token { me = this, MyClass = subs, Callback = k };
-    }
-
-    public void Invalidate ( IEnumerable < T > collection )
-    {
-        Callback ( collection, CollectionChange < T >.Invalidated ( ) );
-    }
-
-    private void Callback ( IEnumerable < T > collection, CollectionChange<T> change )
-    {
-        var key = collection;
-        if ( collectionSubs.TryGetValue ( key, out var subs ) )
-        {
-            if ( subs.Action is { } a )
-                a ( collection, change );
+            entries.TryRemove ( token.Key, out var _ );
         }
     }
 }
