@@ -362,20 +362,30 @@ public class TaskResultToAwaitVisitor : ExpressionVisitor
         {
             await ??= typeof ( AsyncResult ).GetMethod ( nameof ( AsyncResult.Create ) );
 
-            // TODO: Capture cancellation token
-	        var cancellationToken = Expression.Constant ( CancellationToken.None );
+            var task = ( (MemberExpression) left ).Expression;
 
             return Expression.Call ( await.MakeGenericMethod ( left.Type, right.Body.Type ),
-                                     ( (MemberExpression) left ).Expression,
+                                     task,
                                      Expression.Constant ( right.Body ),
                                      right,
-                                     cancellationToken );
+                                     GetCancellationToken ( task ) );
         }
 
         return node;
     }
 
-    private static bool IsTaskResult(Expression node)
+    private static Expression? defaultCancellationToken;
+
+    private static Expression GetCancellationToken ( Expression task )
+    {
+        var token = (Expression?) null;
+        if ( task.NodeType == ExpressionType.Call )
+            token = ( (MethodCallExpression) task ).Arguments.FirstOrDefault ( argument => argument.Type == typeof ( CancellationToken ) );
+
+        return token ?? ( defaultCancellationToken ??= Expression.Constant ( CancellationToken.None ) );
+    }
+
+    private static bool IsTaskResult ( Expression node )
     {
         return node.NodeType == ExpressionType.MemberAccess &&
                ( (MemberExpression) node ).Member.Name == nameof ( Task < object >.Result ) &&

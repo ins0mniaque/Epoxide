@@ -401,15 +401,17 @@ public class BindingTests
         Assert.Equal  ( "33", left.First ( ) );
     }
 
-          Task < int > SafeMethodAsync   ( ) => Task.Run ( ( ) => 42 );
-    async Task < int > UnsafeMethodAsync ( ) => 42;
+          Task < int > SafeMethodAsync   ( CancellationToken cancellationToken ) => Task.Run ( ( ) => 42 );
+    async Task < int > UnsafeMethodAsync ( CancellationToken cancellationToken ) => 42;
 
     [ Fact ]
     public async Task Await ( )
     {
+        using var cancel = new CancellationTokenSource ( );
+
         var left = "";
 
-        Binder.Default.Bind ( ( ) => left == SafeMethodAsync ( ).Result.ToString ( ).ToString ( ) );
+        Binder.Default.Bind ( ( ) => left == SafeMethodAsync ( cancel.Token ).Result.ToString ( ).ToString ( ) );
 
         await Task.Delay ( 250 );
 
@@ -417,7 +419,7 @@ public class BindingTests
 
         left = "";
 
-        Binder.Default.Bind ( ( ) => left == UnsafeMethodAsync ( ).Result.ToString ( ).ToString ( ) );
+        Binder.Default.Bind ( ( ) => left == UnsafeMethodAsync ( cancel.Token ).Result.ToString ( ).ToString ( ) );
 
         Assert.Equal ( "42", left );
     }
