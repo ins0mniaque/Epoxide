@@ -297,7 +297,44 @@ public class BindingTests
         collection = new System.Collections.ObjectModel.ObservableCollection<string> ();
 
         left = new { Collection = collection };
-        
+
+        DefaultBinder.Invalidate ( ( ) => right );
+
+        Assert.Single  ( left.Collection );
+        Assert.Equal   ( "42", left.Collection.First ( ) );
+
+        Assert.Same ( collection, left.Collection );
+    }
+
+    [ Fact ]
+    public void ReverseReadOnlyCollectionProperty ( )
+    {
+        var collection = new System.Collections.ObjectModel.ObservableCollection<string> ();
+
+        var left  = new { Collection = collection };
+        var right = new System.Collections.ObjectModel.ObservableCollection<TestObject> ();
+
+        DefaultBinder.Bind ( ( ) => right.Where ( i => i.State != 0 ).Select ( i => i.State.ToString ( ) ) == left.Collection );
+
+        Assert.NotNull ( left.Collection );
+        Assert.Empty   ( left.Collection );
+
+        right.Add ( new TestObject { State = 42 } );
+
+        Assert.Single ( left.Collection );
+        Assert.Equal  ( "42", left.Collection.First ( ) );
+
+        right.Add ( new TestObject { State = 0 } );
+
+        Assert.Single ( left.Collection );
+        Assert.Equal  ( "42", left.Collection.First ( ) );
+
+        Assert.Same ( collection, left.Collection );
+
+        collection = new System.Collections.ObjectModel.ObservableCollection<string> ();
+
+        left = new { Collection = collection };
+
         DefaultBinder.Invalidate ( ( ) => right );
 
         Assert.Single  ( left.Collection );

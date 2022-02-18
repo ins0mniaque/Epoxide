@@ -380,7 +380,7 @@ public sealed class Binding : IBinding
 {
     readonly CompositeDisposable disposables;
 
-    readonly bool isReadOnlyCollection;
+    readonly ExpressionAccessor? readOnlyCollection;
 
     readonly ExpressionSubscription leftSub;
     readonly ExpressionSubscription rightSub;
@@ -406,29 +406,23 @@ public sealed class Binding : IBinding
         right = new EnumerableToBindableEnumerableVisitor ( binding )  .Visit ( right );
         right = new AggregateInvalidatorVisitor           ( )          .Visit ( right );
 
-        this.Left  = ExpressionAccessor.Create ( left );
+        this.Left  = ExpressionAccessor.Create ( left  );
         this.Right = ExpressionAccessor.Create ( right );
 
-        // TODO: Avoid swapping
-        if ( this.Right.CanWrite && ! this.Left.CanWrite )
+        if ( ! Left.CanWrite && ! Right.CanWrite )
         {
-            var rightToLeft = this.Left;
-
-            this.Left  = this.Right;
-            this.Right = rightToLeft;
-        }
-
-        isReadOnlyCollection = ExprHelper.IsReadOnlyCollection ( left );
-
-        if ( ! isReadOnlyCollection && ! this.Left.CanWrite )
-        {
-            // TODO: BindingException + nicer Expression.ToString ( )
-            if ( left.NodeType == ExpressionType.Convert && left.Type == right.Type && ExprHelper.IsWritable ( ( (UnaryExpression) left ).Operand ) )
-                throw new ArgumentException ( $"Cannot assign { left.Type } to { ( (UnaryExpression) left ).Operand.Type }" );
-            else if ( right.NodeType == ExpressionType.Convert && right.Type == left.Type && ExprHelper.IsWritable ( ( (UnaryExpression) right ).Operand ) )
-                throw new ArgumentException ( $"Cannot assign { right.Type } to { ( (UnaryExpression) right ).Operand.Type }" );
+            if      ( ExprHelper.IsReadOnlyCollection ( left  ) ) readOnlyCollection = Left;
+            else if ( ExprHelper.IsReadOnlyCollection ( right ) ) readOnlyCollection = Right;
+            else
+            {
+                // TODO: BindingException + nicer Expression.ToString ( )
+                if ( left.NodeType == ExpressionType.Convert && left.Type == right.Type && ExprHelper.IsWritable ( ( (UnaryExpression) left ).Operand ) )
+                    throw new ArgumentException ( $"Cannot assign { left.Type } to { ( (UnaryExpression) left ).Operand.Type }" );
+                else if ( right.NodeType == ExpressionType.Convert && right.Type == left.Type && ExprHelper.IsWritable ( ( (UnaryExpression) right ).Operand ) )
+                    throw new ArgumentException ( $"Cannot assign { right.Type } to { ( (UnaryExpression) right ).Operand.Type }" );
             
-            throw new ArgumentException ( $"Neither side is writable { left } == { right }" );
+                throw new ArgumentException ( $"Neither side is writable { left } == { right }" );
+            }
         }
 
         disposables.Add ( leftSub  = CreateSubscription ( Left  ) );
@@ -444,14 +438,9 @@ public sealed class Binding : IBinding
 
     public void Bind ( )
     {
-        if ( isReadOnlyCollection )
-        {
-            Schedule ( Left.Expression, (object?) null, ReadThenBindCollection );
-        }
-        else
-        {
-            Schedule ( Right.Expression, Right, ReadThenWrite );
-        }
+        if      ( Left .CanWrite ) Schedule ( Right.Expression, Right, ReadThenWrite );
+        else if ( Right.CanWrite ) Schedule ( Left .Expression, Left,  ReadThenWrite );
+        else                       Schedule ( readOnlyCollection.Expression, readOnlyCollection, ReadThenBindCollection );
     }
 
     public void Unbind ( )
@@ -463,6 +452,14 @@ public sealed class Binding : IBinding
     public void Attach  ( IDisposable disposable ) => ( activeContainer ?? disposables ).Add ( disposable );
     public bool Detach  ( IDisposable disposable ) => leftContainer.Remove ( disposable ) || rightContainer.Remove ( disposable ) || disposables.Remove ( disposable );
     public void Dispose ( )                        => disposables.Dispose ( );
+
+    private ExpressionSubscription CreateSubscription ( ExpressionAccessor accessor )
+    {
+        if ( readOnlyCollection != null )
+            return new ExpressionSubscription ( Services, accessor.Expression, (o, m) => Schedule ( readOnlyCollection.Expression, readOnlyCollection, ReadThenBindCollection ) );
+
+        return new ExpressionSubscription ( Services, accessor.Expression, (o, m) => Schedule ( accessor.Expression, accessor, ReadThenWrite ) );
+    }
 
     private void Schedule < TState > ( Expression expression, TState state, Action < TState > action )
     {
@@ -510,44 +507,41 @@ public sealed class Binding : IBinding
         Schedule ( otherSide.Expression, (otherSide, value), Write );
     }
 
-    private void Write ( (ExpressionAccessor Expression, object? Value) expressionAndValue )
+    private void Write ( (ExpressionAccessor Expression, object? Value) write )
     {
-        if ( expressionAndValue.Expression.TryWrite ( expressionAndValue.Value, out var target, out var member ) )
-            Callback ( expressionAndValue.Expression.Expression, member, expressionAndValue );
+        if ( write.Expression.TryWrite ( write.Value, out var target, out var member ) )
+            Callback ( write.Expression.Expression, member, write );
 
-        if      ( expressionAndValue.Expression == Left  ) leftSub .Subscribe ( );
-        else if ( expressionAndValue.Expression == Right ) rightSub.Subscribe ( );
+        if      ( write.Expression == Left  ) leftSub .Subscribe ( );
+        else if ( write.Expression == Right ) rightSub.Subscribe ( );
     }
 
-    private void ReadThenBindCollection ( object? state )
+    private void ReadThenBindCollection ( ExpressionAccessor readOnlyCollection )
     {
-        if ( ! TryRead ( Left, out var leftValue ) || leftValue == null )
+        if ( ! TryRead ( readOnlyCollection, out var collection ) || collection == null )
             return;
 
-        Schedule ( Right.Expression, leftValue, BindCollection );
+        var otherSide = readOnlyCollection == Left ? Right : Left;
+
+        Schedule ( otherSide.Expression, (otherSide, collection), BindCollection );
     }
 
-    private void BindCollection ( object leftValue )
+    private void BindCollection ( (ExpressionAccessor Expression, object Collection) bind )
     {
-        if ( ! TryRead ( Right, out var rightValue ) )
+        if ( ! TryRead ( bind.Expression, out var enumerable ) )
             return;
 
-        if ( Services.CollectionSubscriber.BindCollections ( leftValue, rightValue ) is { } binding )
-            rightContainer.Add ( binding );
+        if ( Services.CollectionSubscriber.BindCollections ( Value = bind.Collection, enumerable ) is { } binding )
+        {
+            if      ( bind.Expression == Left  ) leftContainer .Add ( binding );
+            else if ( bind.Expression == Right ) rightContainer.Add ( binding );
+        }
     }
 
     private void Callback ( Expression expression, MemberInfo member, object? value )
     {
         if ( ! Equals ( Value, Value = value ) )
             Services.MemberSubscriber.Invalidate ( expression, member );
-    }
-
-    private ExpressionSubscription CreateSubscription ( ExpressionAccessor accessor )
-    {
-        if ( isReadOnlyCollection )
-            return new ExpressionSubscription ( Services, accessor.Expression, (o, m) => Schedule ( Left.Expression, (object?) null, ReadThenBindCollection ) );
-
-        return new ExpressionSubscription ( Services, accessor.Expression, (o, m) => Schedule ( accessor.Expression, accessor, ReadThenWrite ) );
     }
 }
 
@@ -586,33 +580,34 @@ public sealed class CompositeBinding : IBinding
 
 public static class CollectionBinder
 {
-    public static IDisposable? BindCollections ( this ICollectionSubscriber subscriber, object leftValue, object? rightValue )
+    public static IDisposable? BindCollections ( this ICollectionSubscriber subscriber, object collection, object? enumerable )
     {
         BindCollectionsMethod ??= new Func<ICollectionSubscriber, ICollection<object>, ICollection<object>, IDisposable?>(CollectionBinder.BindCollections).GetMethodInfo().GetGenericMethodDefinition();
 
-        var elementType = ExprHelper.GetGenericInterfaceArguments ( leftValue.GetType ( ), typeof ( ICollection < > ) )? [ 0 ];
+        var elementType = ExprHelper.GetGenericInterfaceArguments ( collection.GetType ( ), typeof ( ICollection < > ) )? [ 0 ];
         var bindCollections = BindCollectionsMethod.MakeGenericMethod ( elementType );
 
-        return (IDisposable?) bindCollections.Invoke ( null, new [ ] { subscriber, leftValue, rightValue } );
+        return (IDisposable?) bindCollections.Invoke ( null, new [ ] { subscriber, collection, enumerable } );
     }
 
     private static MethodInfo? BindCollectionsMethod;
 
-    public static IDisposable? BindCollections < T > ( this ICollectionSubscriber subscriber, ICollection < T > leftValue, IEnumerable < T >? rightValue )
+    public static IDisposable? BindCollections < T > ( this ICollectionSubscriber subscriber, ICollection < T > collection, IEnumerable < T >? enumerable )
     {
-        leftValue.Clear ( );
-        if ( rightValue == null )
+        collection.Clear ( );
+        if ( enumerable == null )
             return null;
 
-        foreach ( var item in rightValue )
-            leftValue.Add ( item );
+        foreach ( var item in enumerable )
+            collection.Add ( item );
 
-        return subscriber.Subscribe ( rightValue, (o, e) =>
+        return subscriber.Subscribe ( enumerable, (o, e) =>
         {
-            leftValue.Clear ( );
-            if ( rightValue != null )
-                foreach ( var item in rightValue )
-                    leftValue.Add ( item );
+            // TODO: Process changes
+            collection.Clear ( );
+            if ( enumerable != null )
+                foreach ( var item in enumerable )
+                    collection.Add ( item );
         } );
     }
 }
