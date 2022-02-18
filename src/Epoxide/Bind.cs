@@ -536,12 +536,11 @@ public sealed class Binding : IBinding
     {
         var value = await asyncResult.Run ( );
 
-        // TODO: Sentinel support for rest
-        if ( asyncResult.Rest is { } rest )
+        if ( asyncResult.Selector is { } selector )
         {
-            Schedule ( rest.Body, (object?) null, _ =>
+            Schedule ( selector, (object?) null, _ =>
             {
-                side.Value = asyncResult.SelectRest ( value );
+                side.Value = asyncResult.RunSelector ( value );
 
                 if ( side.Value is IAsyncResult subAsyncResult )
                     ReadAsync ( side, subAsyncResult, callback );

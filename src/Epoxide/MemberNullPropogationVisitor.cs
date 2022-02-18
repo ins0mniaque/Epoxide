@@ -51,6 +51,7 @@ public static class Sentinel
 // TODO: Fix simple field accesses being transformed in variables
 public class NullPropagationVisitor : ExpressionVisitor
 {
+    public override Expression Visit ( Expression node ) => base.Visit ( node );
     protected override Expression VisitUnary(UnaryExpression propertyAccess)
     {
         if (propertyAccess.Operand is MemberExpression mem)
@@ -92,7 +93,8 @@ public class NullPropagationVisitor : ExpressionVisitor
 
     protected override Expression VisitMethodCall(MethodCallExpression propertyAccess)
     {
-        if (propertyAccess.Object == null)
+        // TODO: Fix support for functions (NodeType == Parameter)
+        if ( propertyAccess.Object == null || propertyAccess.Object.NodeType == ExpressionType.Parameter )
             return base.VisitMethodCall(propertyAccess);
 
         return PropagateNull(propertyAccess.Object, propertyAccess);
@@ -355,11 +357,19 @@ public class TaskResultToAwaitVisitor : ExpressionVisitor
     {
         var splitter = new ExpressionSplitter ( IsTaskResult );
 
+        // TODO: Sentinel support for right part
         if ( splitter.TrySplit ( node, out var left, out var right ) )
         {
-            await ??= typeof ( BindableTask ).GetMethod ( nameof ( BindableTask.Await ) );
+            await ??= typeof ( AsyncResult ).GetMethod ( nameof ( AsyncResult.Create ) );
 
-            return Expression.Call ( await.MakeGenericMethod ( left.Type, right.Body.Type ), ( (MemberExpression) left ).Expression, right );
+            // TODO: Capture cancellation token
+	        var cancellationToken = Expression.Constant ( CancellationToken.None );
+
+            return Expression.Call ( await.MakeGenericMethod ( left.Type, right.Body.Type ),
+                                     ( (MemberExpression) left ).Expression,
+                                     Expression.Constant ( right.Body ),
+                                     right,
+                                     cancellationToken );
         }
 
         return node;
@@ -403,56 +413,5 @@ public class TaskResultToAwaitVisitor : ExpressionVisitor
 
             return base.Visit ( node );
         }
-    }
-}
-
-public interface ITaskRunner
-{
-    IDisposable Run < T > ( Expression expression, Task < T > a, Action < T > callback, Action < Exception > errorCallback );
-}
-
-public interface IAsyncResult
-{
-    public Task Task { get; }
-    LambdaExpression Rest { get; }
-
-    Task < object? > Run ( );
-    object? SelectRest ( object? result );
-}
-
-public class AsyncResult < T, TResult > : IAsyncResult
-{
-    public AsyncResult ( Task < T > task, Expression < Func < T, TResult > >? rest )
-    {
-        Task = task;
-        Rest = rest;
-    }
-
-    public Task < T > Task { get; }
-    public Expression < Func < T, TResult > >? Rest { get; }
-
-    Task IAsyncResult.Task => Task;
-
-    LambdaExpression IAsyncResult.Rest => Rest;
-
-    async Task<object?> IAsyncResult.Run ( ) => await Task;
-
-    object? IAsyncResult.SelectRest ( object? result )
-    {
-        return CachedExpressionCompiler.Compile ( Rest ) ( (T) result );
-    }
-}
-
-public static class BindableTask
-{
-    // TODO: Capture cancellation token
-	public static object? Await<T, TResult>(this Task<T> source, Expression < Func< T, TResult > >? rest )
-    {
-        if (source == null)
-            throw new ArgumentNullException(nameof(source));
-
-        // TODO: Compile method here? Or just use Func<> ?
-
-        return new AsyncResult<T, TResult>(source, rest);
     }
 }
