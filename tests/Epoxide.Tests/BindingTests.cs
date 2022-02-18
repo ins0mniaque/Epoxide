@@ -369,4 +369,35 @@ public class BindingTests
         Assert.Single ( left );
         Assert.Equal  ( "42", left.First ( ) );
     }
+
+    [ Fact ]
+    public void Configure ( )
+    {
+        var left  = (IReadOnlyCollection<string>?) null;
+        var right = new System.Collections.ObjectModel.ObservableCollection<NotifyTestObject> ();
+
+        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i.State != 0 ).Configure ( o => o.ToString ( ) ).Select ( i => i.State.ToString ( ) ) );
+
+        Assert.NotNull ( left );
+        Assert.Empty   ( left );
+
+        right.Add ( new NotifyTestObject { State = 42 } );
+
+        Assert.Single ( left );
+        Assert.Equal  ( "42", left.First ( ) );
+
+        right.Add ( new NotifyTestObject { State = 0 } );
+
+        Assert.Single ( left );
+        Assert.Equal  ( "42", left.First ( ) );
+
+        right [ 0 ].State = 0;
+
+        Assert.Empty ( left );
+
+        right [ 1 ].State = 33;
+
+        Assert.Single ( left );
+        Assert.Equal  ( "33", left.First ( ) );
+    }
 }

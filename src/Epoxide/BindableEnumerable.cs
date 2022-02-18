@@ -7,12 +7,19 @@ using Epoxide.Linq;
 
 namespace Epoxide;
 
+public sealed class BindableEnumerableOptions
+{
+
+}
+
 public interface IBindableEnumerable : IEnumerable
 {
 	event EventHandler < EventArgs >? Executed;
 
 	IBinding    Binding { get; }
 	IEnumerable Source  { get; }
+
+	BindableEnumerableOptions Options { get; } 
 
 	// NOTE: Hide inside internal interface?
 	void NotifyExecuted ( IBindableEnumerable enumerable );
@@ -48,6 +55,8 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
 
     public abstract IBinding    Binding { get; }
     public abstract IEnumerable Source  { get; }
+
+	public abstract BindableEnumerableOptions Options { get; }
 
 	public abstract void SetTarget < TElement > ( ICollection < TElement > collection );
 	public abstract void SetTarget				( Expression			   expression );
@@ -106,23 +115,21 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 {
 	private readonly IBinding _binding;
 	private IEnumerable<T> _enumerable;
+	private BindableEnumerableOptions _options;
 	private List<IBindableEnumerable>? _chain;
 
     public BindableEnumerable(IBinding binding, IEnumerable<T> enumerable)
     {
         _binding    = binding;
         _enumerable = enumerable;
-    }
-
-	protected BindableEnumerable(IBinding binding)
-    {
-        _binding    = binding;
-        _enumerable = this;
+		_options    = new();
     }
 
     public override IBinding Binding => _binding;
 
 	public override IEnumerable Source => _enumerable;
+
+	public override BindableEnumerableOptions Options => _options;
 
 	public override void NotifyExecuted ( IBindableEnumerable enumerable )
 	{
@@ -238,6 +245,8 @@ public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumer
 	public override IBinding Binding => Parent.Binding;
 
 	public override IEnumerable Source => Parent.Source;
+
+	public override BindableEnumerableOptions Options => Parent.Options;
 
     public override void SetTarget < TElement > ( ICollection < TElement > collection ) => Parent.SetTarget ( collection );
     public override void SetTarget              ( Expression			   expression ) => Parent.SetTarget ( expression );
@@ -361,6 +370,21 @@ public static class BindableEnumerable
             return bindable;
 
         return new BindableEnumerable<TElement>(binding, source);
+    }
+
+	public static TEnumerable Configure<TEnumerable>(this TEnumerable source, Action<BindableEnumerableOptions> configure)
+		where TEnumerable : IEnumerable
+    {
+        if (source == null)
+            throw Error.ArgumentNull(nameof(source));
+
+		if (configure == null)
+            throw Error.ArgumentNull(nameof(configure));
+
+		if ( source is IBindableEnumerable bindable )
+			configure ( bindable.Options );
+
+		return source;
     }
 
 	// TODO: Remove extension and call directly in rewriter
