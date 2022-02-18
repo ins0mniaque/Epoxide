@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Epoxide;
 
@@ -10,18 +11,19 @@ public static class Sentinel
 
     public static Expression AddSentinel ( this Expression node )
     {
-        node = nullPropagationVisitor.Visit ( node );
+        node = taskResultToAwaitVisitor.Visit ( node );
+        node = nullPropagationVisitor  .Visit ( node );
 
-        if ( node.NodeType == ExpressionType.Coalesce && ((BinaryExpression)node).Right is ConstantExpression )
+        if ( node.NodeType == ExpressionType.Coalesce && ( (BinaryExpression) node ).Right is ConstantExpression )
             return node;
 
         if ( ! IsNullable ( node.Type ) || node.NodeType == ExpressionType.MemberAccess && IsClosure ( ( (MemberExpression) node ).Expression ) )
             return node;
 
-        if ( node.Type != typeof(object))
-            node = Expression.Convert ( (Expression) node, typeof(object) );
+        if ( node.Type != typeof ( object ) )
+            node = Expression.Convert ( node, typeof ( object ) );
 
-        return Expression.Coalesce ( (Expression) node, Expression.Constant ( Value ) );
+        return Expression.Coalesce ( node, Expression.Constant ( Value ) );
     }
 
     private static bool IsClosure ( Expression ex )
@@ -37,7 +39,8 @@ public static class Sentinel
             type.GetGenericTypeDefinition() == typeof(Nullable<>);
     }
 
-    private static readonly NullPropagationVisitor nullPropagationVisitor = new ( );
+    private static readonly NullPropagationVisitor   nullPropagationVisitor   = new ( );
+    private static readonly TaskResultToAwaitVisitor taskResultToAwaitVisitor = new ( );
 
     private class SentinelObject
     {
@@ -62,7 +65,8 @@ public class NullPropagationVisitor : ExpressionVisitor
                     ifTrue: MakeNullable(Visit(cond.IfTrue)),
                     ifFalse: MakeNullable(Visit(cond.IfFalse)));
 
-        if (propertyAccess.Operand is LambdaExpression)
+        // TODO: Fix support for lambdas
+        if (propertyAccess.Operand is LambdaExpression lambda)
             return propertyAccess;
 
         return base.VisitUnary(propertyAccess);
@@ -79,6 +83,7 @@ public class NullPropagationVisitor : ExpressionVisitor
 
     protected override Expression VisitMember(MemberExpression propertyAccess)
     {
+        // TODO: This doesn't work...
         if ( IsClosure ( propertyAccess.Expression ) )
             return base.VisitMember ( propertyAccess );
 
@@ -99,7 +104,7 @@ public class NullPropagationVisitor : ExpressionVisitor
         var caller = Expression.Variable(safe.Type, "caller");
         var assign = Expression.Assign(caller, safe);
         var acess = MakeNullable(new ExpressionReplacer(instance,
-            IsNullableStruct(instance) ? caller : RemoveNullable(caller)).Visit(propertyAccess));
+                IsNullableStruct(instance) ? caller : RemoveNullable(caller)).Visit(propertyAccess));
         var ternary = Expression.Condition(
                     test: Expression.Equal(caller, Expression.Constant(null)),
                     ifTrue: Expression.Constant(null, acess.Type),
@@ -339,5 +344,115 @@ public class AggregateInvalidatorVisitor : ExpressionVisitor
             return node;
 
         return base.VisitMethodCall ( node );
+    }
+}
+
+public class TaskResultToAwaitVisitor : ExpressionVisitor
+{
+    private static MethodInfo? await;
+
+    public override Expression Visit ( Expression node )
+    {
+        var splitter = new ExpressionSplitter ( IsTaskResult );
+
+        if ( splitter.TrySplit ( node, out var left, out var right ) )
+        {
+            await ??= typeof ( BindableTask ).GetMethod ( nameof ( BindableTask.Await ) );
+
+            return Expression.Call ( await.MakeGenericMethod ( left.Type, right.Body.Type ), ( (MemberExpression) left ).Expression, right );
+        }
+
+        return node;
+    }
+
+    private static bool IsTaskResult(Expression node)
+    {
+        return node.NodeType == ExpressionType.MemberAccess &&
+               ( (MemberExpression) node ).Member.Name == nameof ( Task < object >.Result ) &&
+               ( (MemberExpression) node ).Member.DeclaringType.BaseType == typeof ( Task );
+    }
+
+    private class ExpressionSplitter : ExpressionVisitor
+    {
+        private readonly Func<Expression, bool> predicate;
+        private Expression? split;
+        private ParameterExpression? parameter;
+
+        public ExpressionSplitter(Func<Expression, bool> predicate)
+        {
+            this.predicate = predicate;
+        }
+
+        public bool TrySplit ( Expression node, [NotNullWhen(true)] out Expression? left, [NotNullWhen(true)] out LambdaExpression? right )
+        {
+            var body = Visit ( node );
+
+            left  = split;
+            right = split != null ? Expression.Lambda ( body, parameter ) : null;
+
+            return left != null;
+        }
+
+        public override Expression Visit ( Expression node )
+        {
+            if ( node != null && predicate ( node ) )
+            {
+                split = node;
+                return parameter = Expression.Parameter(node.Type);
+            }
+
+            return base.Visit ( node );
+        }
+    }
+}
+
+public interface ITaskRunner
+{
+    IDisposable Run < T > ( Expression expression, Task < T > a, Action < T > callback, Action < Exception > errorCallback );
+}
+
+public interface IAsyncResult
+{
+    public Task Task { get; }
+    LambdaExpression Rest { get; }
+
+    Task < object? > Run ( );
+    object? SelectRest ( object? result );
+}
+
+public class AsyncResult < T, TResult > : IAsyncResult
+{
+    public AsyncResult ( Task < T > task, Expression < Func < T, TResult > >? rest )
+    {
+        Task = task;
+        Rest = rest;
+    }
+
+    public Task < T > Task { get; }
+    public Expression < Func < T, TResult > >? Rest { get; }
+
+    Task IAsyncResult.Task => Task;
+
+    LambdaExpression IAsyncResult.Rest => Rest;
+
+    async Task<object?> IAsyncResult.Run ( ) => await Task;
+
+    object? IAsyncResult.SelectRest ( object? result )
+    {
+        return CachedExpressionCompiler.Compile ( Rest ) ( (T) result );
+    }
+}
+
+public static class BindableTask
+{
+    // TODO: Capture cancellation token
+	public static object? Await<T, TResult>(this Task<T> source, Expression < Func< T, TResult > >? rest )
+    {
+        if (source == null)
+            throw new ArgumentNullException(nameof(source));
+
+        // TODO: Compile method here? Or just use Func<> ?
+
+        return new AsyncResult<T, TResult>(source, rest);
     }
 }

@@ -452,15 +452,16 @@ public sealed class Binding : IBinding
     public void Dispose ( )                        => disposables.Dispose ( );
 
     private void ScheduleReadThenWriteToOtherSide         ( Side side ) => Schedule ( side.Accessor.Expression, side, ReadThenWriteToOtherSide );
-    private void ScheduleReadThenAddFromOtherSide         ( Side side ) => Schedule ( side.Accessor.Expression, side, ReadThenAddFromOtherSide );
-    private void ScheduleOtherSideReadThenAddFromThisSide ( Side side ) => Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, ReadThenAddFromOtherSide );
+    private void ScheduleReadThenAddFromOtherSide         ( Side side ) => Schedule ( side.Accessor.Expression, side, ReadThenReadThenAddFromOtherSide );
+    private void ScheduleOtherSideReadThenAddFromThisSide ( Side side ) => Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, ReadThenReadThenAddFromOtherSide );
 
     private void ReadThenWriteToOtherSide ( Side side )
     {
         if ( ! TryRead ( side ) )
             return;
 
-        Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, WriteFromOtherSide );
+        if ( ! TryReadAsync ( side, side => Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, WriteFromOtherSide ) ) )
+            Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, WriteFromOtherSide );
     }
 
     private void WriteFromOtherSide ( Side side )
@@ -472,20 +473,33 @@ public sealed class Binding : IBinding
         side.Subscription.Subscribe ( );
     }
 
-    private void ReadThenAddFromOtherSide ( Side side )
+    private void ReadThenReadThenAddFromOtherSide ( Side side )
     {
         if ( ! TryRead ( side ) || side.Value == null )
             return;
 
-        Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, AddToOtherSide );
+        if ( ! TryReadAsync ( side, ScheduleReadThenAddToOtherSide ) )
+            ScheduleReadThenAddToOtherSide ( side );
+    }
+
+    private void ScheduleReadThenAddToOtherSide ( Side side )
+    {
+        if ( side.Value != null )
+            Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, ReadThenAddToOtherSide );
+    }
+
+    private void ReadThenAddToOtherSide ( Side side )
+    {
+        if ( ! TryRead ( side ) )
+            return;
+
+        if ( ! TryReadAsync ( side, AddToOtherSide ) )
+            AddToOtherSide ( side );
     }
 
     private void AddToOtherSide ( Side side )
     {
-        if ( ! TryRead ( side ) || side.OtherSide.Value is not { } collection )
-            return;
-
-        if ( Services.CollectionSubscriber.BindCollections ( Value = collection, side.Value ) is { } binding )
+        if ( side.OtherSide.Value is { } collection && Services.CollectionSubscriber.BindCollections ( Value = collection, side.Value ) is { } binding )
             side.Container.Add ( binding );
     }
 
@@ -499,11 +513,51 @@ public sealed class Binding : IBinding
 
         side.Value = read ? value : null;
 
-        side.Subscription.Subscribe ( );
+        if ( value is not IAsyncResult )
+            side.Subscription.Subscribe ( );
 
         activeContainer = null;
 
         return read;
+    }
+
+    private bool TryReadAsync ( Side side, Action < Side > callback )
+    {
+        if ( side.Value is IAsyncResult asyncResult )
+        {
+            ReadAsync ( side, asyncResult, callback );
+            return true;
+        }
+
+        return false;
+    }
+
+    private async void ReadAsync ( Side side, IAsyncResult asyncResult, Action < Side > callback )
+    {
+        var value = await asyncResult.Run ( );
+
+        // TODO: Sentinel support for rest
+        if ( asyncResult.Rest is { } rest )
+        {
+            Schedule ( rest.Body, (object?) null, _ =>
+            {
+                side.Value = asyncResult.SelectRest ( value );
+
+                if ( side.Value is IAsyncResult subAsyncResult )
+                    ReadAsync ( side, subAsyncResult, callback );
+                else
+                    callback ( side );
+            } );
+        }
+        else
+        {
+            side.Value = value;
+
+            if ( side.Value is IAsyncResult subAsyncResult )
+                ReadAsync ( side, subAsyncResult, callback );
+            else
+                callback ( side );
+        }
     }
 
     private void Schedule < TState > ( Expression expression, TState state, Action < TState > action )

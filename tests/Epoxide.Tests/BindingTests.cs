@@ -401,34 +401,25 @@ public class BindingTests
         Assert.Equal  ( "33", left.First ( ) );
     }
 
-    Task < int > SafeMethodAsync ( AutoResetEvent wait ) => Task.Run ( ( ) =>
-    {
-        wait.WaitOne ( 1000 );
-
-        return 42;
-    } );
-
-    async Task < int > UnsafeMethodAsync ( AutoResetEvent wait )
-    {
-        wait.WaitOne ( 1000 );
-
-        return 42;
-    }
+          Task < int > SafeMethodAsync   ( ) => Task.Run ( ( ) => 42 );
+    async Task < int > UnsafeMethodAsync ( ) => 42;
 
     [ Fact ]
-    public void Await ( )
+    public async Task Await ( )
     {
-        using var wait = new AutoResetEvent ( false );
+        var left = "";
 
-        var left = 0;
+        Binder.Default.Bind ( ( ) => left == SafeMethodAsync ( ).Result.ToString ( ).ToString ( ) );
 
-        Binder.Default.Bind ( ( ) => left == SafeMethodAsync ( wait ).Result );
+        await Task.Delay ( 250 );
 
-        Assert.Equal ( 0, left );
+        Assert.Equal ( "42", left );
 
-        wait.Set ( );
+        left = "";
 
-        Assert.Equal ( 42, left );
+        Binder.Default.Bind ( ( ) => left == UnsafeMethodAsync ( ).Result.ToString ( ).ToString ( ) );
+
+        Assert.Equal ( "42", left );
     }
 
     public class Button
