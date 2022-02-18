@@ -10,7 +10,7 @@ public class BindingTests
         var left = "";
         var right = "hello";
 
-        DefaultBinder.Bind ( ( ) => left == right );
+        Binder.Default.Bind ( ( ) => left == right );
 
         Assert.Equal ( left, right );
         Assert.Equal ( left, "hello" );
@@ -22,7 +22,7 @@ public class BindingTests
         var left = "hello";
         var right = "";
 
-        DefaultBinder.Bind ( ( ) => left == right );
+        Binder.Default.Bind ( ( ) => left == right );
 
         Assert.Equal ( left, right );
         Assert.Equal ( left, "" );
@@ -39,7 +39,7 @@ public class BindingTests
         TestObject left = null;
         TestObject right = new TestObject ( );
 
-        DefaultBinder.Bind ( ( ) => left == right );
+        Binder.Default.Bind ( ( ) => left == right );
 
         Assert.Equivalent ( left, right );
         Assert.NotNull ( left );
@@ -51,7 +51,7 @@ public class BindingTests
         TestObject left = new TestObject ( );
         TestObject right = null;
 
-        DefaultBinder.Bind ( ( ) => left == right );
+        Binder.Default.Bind ( ( ) => left == right );
 
         Assert.Equivalent ( left, right );
         Assert.Null ( left );
@@ -63,7 +63,7 @@ public class BindingTests
         var left = 69;
         TestObject right = new TestObject {State = 42,};
 
-        DefaultBinder.Bind ( ( ) => left == right.State );
+        Binder.Default.Bind ( ( ) => left == right.State );
 
         Assert.Equal ( left, right.State );
         Assert.Equal ( left, 42 );
@@ -75,7 +75,7 @@ public class BindingTests
         TestObject left = new TestObject {State = 42,};
         var right = 1001;
 
-        DefaultBinder.Bind ( ( ) => left.State == right );
+        Binder.Default.Bind ( ( ) => left.State == right );
 
         Assert.Equal ( left.State, right );
         Assert.Equal ( left.State, 1001 );
@@ -91,7 +91,7 @@ public class BindingTests
     {
         var left = 0;
 
-        DefaultBinder.Bind ( ( ) => left == Method ( ) );
+        Binder.Default.Bind ( ( ) => left == Method ( ) );
 
         Assert.Equal ( left, 33 );
     }
@@ -101,7 +101,7 @@ public class BindingTests
     {
         var right = 42;
 
-        DefaultBinder.Bind ( ( ) => Method ( ) == right );
+        Binder.Default.Bind ( ( ) => Method ( ) == right );
 
         Assert.Equal ( right, 33 );
     }
@@ -111,7 +111,7 @@ public class BindingTests
     {
         var right = 0.0;
 
-        DefaultBinder.Bind ( ( ) => Method ( ) == right );
+        Binder.Default.Bind ( ( ) => Method ( ) == right );
 
         Assert.Equal ( 33.0, right );
     }
@@ -122,13 +122,13 @@ public class BindingTests
         var left  = (object?) null;
         var right = "value";
 
-        DefaultBinder.Bind ( ( ) => ( left.ToString ( ) ?? null ) == right );
+        Binder.Default.Bind ( ( ) => ( left.ToString ( ) ?? null ) == right );
 
         Assert.Equal ( right, null );
 
         right = "value";
 
-        DefaultBinder.Bind ( ( ) => left.ToString ( ) == right );
+        Binder.Default.Bind ( ( ) => left.ToString ( ) == right );
 
         Assert.Equal ( right, "value" );
     }
@@ -139,15 +139,15 @@ public class BindingTests
         var left  = (TestObject?) null;
         var right = (int?) -1;
 
-        DefaultBinder.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right );
+        Binder.Default.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right );
 
         Assert.Equal ( right, null );
 
         right = -1;
 
-        DefaultBinder.Bind ( ( ) => left.State                     == right );
-        DefaultBinder.Bind ( ( ) => left.ToString ( ).Length       == right );
-        DefaultBinder.Bind ( ( ) => left.State.ToString ( ).Length == right );
+        Binder.Default.Bind ( ( ) => left.State                     == right );
+        Binder.Default.Bind ( ( ) => left.ToString ( ).Length       == right );
+        Binder.Default.Bind ( ( ) => left.State.ToString ( ).Length == right );
 
         Assert.Equal ( right, -1 );
     }
@@ -158,17 +158,17 @@ public class BindingTests
         var left   = (TestObject?) null;
         var right  = (int) -1;
 
-        DefaultBinder.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? 42 ) == right );
+        Binder.Default.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? 42 ) == right );
 
         Assert.Equal ( right, 42 );
 
         right = -1;
 
-        Assert.Throws < ArgumentException > ( ( ) => DefaultBinder.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right ) );
+        Assert.Throws < ArgumentException > ( ( ) => Binder.Default.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right ) );
 
-        DefaultBinder.Bind ( ( ) => left.State                     == right );
-        DefaultBinder.Bind ( ( ) => left.ToString ( ).Length       == right );
-        DefaultBinder.Bind ( ( ) => left.State.ToString ( ).Length == right );
+        Binder.Default.Bind ( ( ) => left.State                     == right );
+        Binder.Default.Bind ( ( ) => left.ToString ( ).Length       == right );
+        Binder.Default.Bind ( ( ) => left.State.ToString ( ).Length == right );
 
         Assert.Equal ( right, -1 );
     }
@@ -179,7 +179,7 @@ public class BindingTests
         var left  = -1;
         var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
 
-        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i != 42 ).Select ( i => i + 50 ).Sum ( ) );
+        Binder.Default.Bind ( ( ) => left == right.Where ( i => i != 42 ).Select ( i => i + 50 ).Sum ( ) );
 
         Assert.Equal ( 0, left );
 
@@ -202,7 +202,7 @@ public class BindingTests
         var left  = (IReadOnlyCollection<string>?) null;
         var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
 
-        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ).ToList ( ) );
+        Binder.Default.Bind ( ( ) => left == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ).ToList ( ) );
 
         Assert.NotNull ( left );
         Assert.Empty   ( left );
@@ -244,7 +244,7 @@ public class BindingTests
         var left  = (IReadOnlyCollection<string>?) null;
         var right = new System.Collections.ObjectModel.ObservableCollection<NotifyTestObject> ();
 
-        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i.State != 0 ).Select ( i => i.State.ToString ( ) ) );
+        Binder.Default.Bind ( ( ) => left == right.Where ( i => i.State != 0 ).Select ( i => i.State.ToString ( ) ) );
 
         Assert.NotNull ( left );
         Assert.Empty   ( left );
@@ -277,7 +277,7 @@ public class BindingTests
         var left  = new { Collection = collection };
         var right = new System.Collections.ObjectModel.ObservableCollection<TestObject> ();
 
-        DefaultBinder.Bind ( ( ) => left.Collection == right.Where ( i => i.State != 0 ).Select ( i => i.State.ToString ( ) ) );
+        Binder.Default.Bind ( ( ) => left.Collection == right.Where ( i => i.State != 0 ).Select ( i => i.State.ToString ( ) ) );
 
         Assert.NotNull ( left.Collection );
         Assert.Empty   ( left.Collection );
@@ -298,7 +298,7 @@ public class BindingTests
 
         left = new { Collection = collection };
 
-        DefaultBinder.Invalidate ( ( ) => right );
+        Binder.Default.Invalidate ( ( ) => right );
 
         Assert.Single  ( left.Collection );
         Assert.Equal   ( "42", left.Collection.First ( ) );
@@ -314,7 +314,7 @@ public class BindingTests
         var left  = new { Collection = collection };
         var right = new System.Collections.ObjectModel.ObservableCollection<TestObject> ();
 
-        DefaultBinder.Bind ( ( ) => right.Where ( i => i.State != 0 ).Select ( i => i.State.ToString ( ) ) == left.Collection );
+        Binder.Default.Bind ( ( ) => right.Where ( i => i.State != 0 ).Select ( i => i.State.ToString ( ) ) == left.Collection );
 
         Assert.NotNull ( left.Collection );
         Assert.Empty   ( left.Collection );
@@ -335,7 +335,7 @@ public class BindingTests
 
         left = new { Collection = collection };
 
-        DefaultBinder.Invalidate ( ( ) => right );
+        Binder.Default.Invalidate ( ( ) => right );
 
         Assert.Single  ( left.Collection );
         Assert.Equal   ( "42", left.Collection.First ( ) );
@@ -354,7 +354,7 @@ public class BindingTests
         var left  = (CustomObservableCollection<string>?) null;
         var right = new System.Collections.ObjectModel.ObservableCollection<int> ();
 
-        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ) );
+        Binder.Default.Bind ( ( ) => left == right.Where ( i => i != 0 ).Select ( i => i.ToString ( ) ) );
 
         Assert.NotNull ( left );
         Assert.Empty   ( left );
@@ -376,7 +376,7 @@ public class BindingTests
         var left  = (IReadOnlyCollection<string>?) null;
         var right = new System.Collections.ObjectModel.ObservableCollection<NotifyTestObject> ();
 
-        DefaultBinder.Bind ( ( ) => left == right.Where ( i => i.State != 0 ).Configure ( o => o.ToString ( ) ).Select ( i => i.State.ToString ( ) ) );
+        Binder.Default.Bind ( ( ) => left == right.Where ( i => i.State != 0 ).Configure ( o => o.ToString ( ) ).Select ( i => i.State.ToString ( ) ) );
 
         Assert.NotNull ( left );
         Assert.Empty   ( left );
@@ -399,5 +399,112 @@ public class BindingTests
 
         Assert.Single ( left );
         Assert.Equal  ( "33", left.First ( ) );
+    }
+
+    Task < int > SafeMethodAsync ( AutoResetEvent wait ) => Task.Run ( ( ) =>
+    {
+        wait.WaitOne ( 1000 );
+
+        return 42;
+    } );
+
+    async Task < int > UnsafeMethodAsync ( AutoResetEvent wait )
+    {
+        wait.WaitOne ( 1000 );
+
+        return 42;
+    }
+
+    [ Fact ]
+    public void Await ( )
+    {
+        using var wait = new AutoResetEvent ( false );
+
+        var left = 0;
+
+        Binder.Default.Bind ( ( ) => left == SafeMethodAsync ( wait ).Result );
+
+        Assert.Equal ( 0, left );
+
+        wait.Set ( );
+
+        Assert.Equal ( 42, left );
+    }
+
+    public class Button
+    {
+        public event EventHandler? Click;
+
+        public void RaiseClick ( )
+        {
+            Click?.Invoke ( this, EventArgs.Empty );
+        }
+    }
+
+    [ Fact ]
+    public void Event ( )
+    {
+        var button = new Button ( );
+        var left   = "";
+
+        Binder.Default.Bind ( ( ) => button.Event ( nameof ( Button.Click ), ( ) => left == button.ToString ( ) ) );
+
+        Assert.Equal ( "", left );
+
+        button.RaiseClick ( );
+
+        Assert.Equal ( button.ToString ( ), left );
+
+        left = "";
+
+        Binder.Default.Bind ( ( ) => button.Event < EventArgs > ( nameof ( Button.Click ), e => left == button.ToString ( ) ) );
+
+        Assert.Equal ( "", left );
+
+        button.RaiseClick ( );
+
+        Assert.Equal ( button.ToString ( ), left );
+
+        left = "";
+
+        Binder.Default.Bind ( ( ) => button.Clicked ( e => left == button.ToString ( ) ) );
+
+        Assert.Equal ( "", left );
+
+        button.RaiseClick ( );
+
+        Assert.Equal ( button.ToString ( ), left );
+    }
+}
+
+[ AttributeUsage ( AttributeTargets.Method ) ]
+public sealed class BindableEventAttribute : Attribute
+{
+    public BindableEventAttribute(string eventName, Type eventHandlerType)
+    {
+        EventName        = eventName;
+        EventHandlerType = eventHandlerType;
+    }
+
+    public string EventName        { get; }
+    public Type   EventHandlerType { get; }
+}
+
+public static class BindableEvent
+{
+    [BindableEvent(nameof(BindingTests.Button.Click), typeof(EventHandler))]
+    public static bool Clicked ( this BindingTests.Button button, Func < EventArgs, bool > d )
+    {
+        throw new NotImplementedException();
+    }
+
+    public static bool Event ( this BindingTests.Button button, string name, Func < bool > d )
+    {
+        throw new NotImplementedException();
+    }
+
+    public static bool Event < TArgs > ( this BindingTests.Button button, string name, Func < TArgs, bool > d )
+    {
+        throw new NotImplementedException();
     }
 }

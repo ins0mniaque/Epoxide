@@ -24,7 +24,36 @@ public interface IBinder
     IBinderServices Services { get; }
 
     IBinding Bind ( );
-    IBinding Bind < T > ( Expression < Func < T > > specifications );
+    IBinding Bind ( Expression specifications );
+}
+
+public static class BinderExtensions
+{
+    public static void Invalidate ( this IBinder binder, Expression expression )
+    {
+        binder.Services.Invalidate ( expression );
+    }
+
+    public static void Invalidate ( this IBinding binding, Expression expression )
+    {
+        binding.Services.Invalidate ( expression );
+    }
+
+    public static void Invalidate ( this IBinderServices services, Expression expression )
+    {
+        if ( expression.NodeType == ExpressionType.Lambda )
+            expression = ( (LambdaExpression) expression ).Body;
+
+        if ( expression.NodeType == ExpressionType.MemberAccess )
+        {
+            var m = (MemberExpression) expression;
+            var x = m.Expression.AddSentinel ( );
+            if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != Sentinel.Value )
+                services.MemberSubscriber.Invalidate ( obj, m.Member );
+        }
+        else
+            throw new NotSupportedException();
+    }
 }
 
 public class Binder : IBinder
@@ -49,9 +78,12 @@ public class Binder : IBinder
         return new CompositeBinding ( Services, Enumerable.Empty < IBinding > ( ) );
     }
 
-    public IBinding Bind < T > ( Expression < Func < T > > specifications )
+    public IBinding Bind ( Expression specifications )
     {
-        var binding = Parse ( specifications.Body );
+        if ( specifications.NodeType == ExpressionType.Lambda )
+            specifications = ( (LambdaExpression) specifications ).Body;
+
+        var binding = Parse ( specifications );
 
         binding.Bind ( );
 
@@ -254,49 +286,6 @@ public class NoScheduler : IScheduler
         action ( state );
 
         return null;
-    }
-}
-
-public static class DefaultBinder
-{
-    public static readonly Binder factory = new Binder ( );
-
-    public static IBinding Bind<T> ( Expression<Func<T>> specifications )
-    {
-        return Binder.Default.Bind ( specifications );
-    }
-
-    public static void Invalidate<T> ( Expression<Func<T>> lambdaExpr )
-    {
-        Binder.Default.Invalidate ( lambdaExpr );
-    }
-
-    public static void Invalidate<T> ( this IBinder binder, Expression<Func<T>> lambdaExpr )
-    {
-        binder.Invalidate ( lambdaExpr.Body );
-    }
-
-    public static void Invalidate ( this IBinder binder, Expression expression )
-    {
-        binder.Services.Invalidate ( expression );
-    }
-
-    public static void Invalidate ( this IBinding binding, Expression expression )
-    {
-        binding.Services.Invalidate ( expression );
-    }
-
-    public static void Invalidate ( this IBinderServices services, Expression expression )
-    {
-        if ( expression.NodeType == ExpressionType.MemberAccess )
-        {
-            var m = (MemberExpression) expression;
-            var x = m.Expression.AddSentinel ( );
-            if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != Sentinel.Value )
-                services.MemberSubscriber.Invalidate ( obj, m.Member );
-        }
-        else
-            throw new NotSupportedException();
     }
 }
 
@@ -558,6 +547,7 @@ public sealed class CompositeBinding : IBinding
 {
     readonly CompositeDisposable disposables;
 
+    public CompositeBinding ( IBinderServices services ) : this ( services, Enumerable.Empty < IBinding > ( ) ) { }
     public CompositeBinding ( IBinderServices services, IEnumerable < IBinding > bindings )
     {
         disposables = new CompositeDisposable ( );

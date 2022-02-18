@@ -353,12 +353,12 @@ public static class BindableEnumerable
 	// TODO: Use weak binder here
 	public static IBindableEnumerable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source)
     {
-		return source.AsBindable ( Binder.Default.Bind ( ) );
+		return new BindableEnumerable<TElement>(new CompositeBinding ( Binder.Default.Services ), source);
     }
 
 	public static IBindableEnumerable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source, out IBinding binding)
     {
-		return source.AsBindable ( binding = Binder.Default.Bind ( ) );
+		return new BindableEnumerable<TElement>(binding = new CompositeBinding ( Binder.Default.Services ), source);
     }
 
 	public static IBindableEnumerable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source, IBinding binding)

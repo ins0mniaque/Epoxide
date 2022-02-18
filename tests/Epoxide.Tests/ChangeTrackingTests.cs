@@ -49,7 +49,7 @@ public class ChangeTrackingTests
         var obj = new PropertyChangedEventObject {StringValue = "Hello",};
         var left = "";
 
-        DefaultBinder.Bind ( ( ) => left == obj.StringValue );
+        Binder.Default.Bind ( ( ) => left == obj.StringValue );
 
         Assert.Equal ( 1, obj.StringValueChangedCount );
 
@@ -67,7 +67,7 @@ public class ChangeTrackingTests
         var objB = new PropertyChangedEventObject {StringValue = "World",};
         var left = "";
 
-        DefaultBinder.Bind ( ( ) => left == objA.StringValue + ", " + objB.StringValue );
+        Binder.Default.Bind ( ( ) => left == objA.StringValue + ", " + objB.StringValue );
 
         Assert.Equal ( "Hello, World", left );
 
@@ -87,8 +87,8 @@ public class ChangeTrackingTests
         var leftA = "";
         var leftB = "";
 
-        DefaultBinder.Bind ( ( ) => leftA == obj.StringValue );
-        DefaultBinder.Bind ( ( ) => leftB == obj.StringValue + "..." );
+        Binder.Default.Bind ( ( ) => leftA == obj.StringValue );
+        Binder.Default.Bind ( ( ) => leftB == obj.StringValue + "..." );
 
         Assert.Equal ( 1, obj.StringValueChangedCount );
 
@@ -108,8 +108,8 @@ public class ChangeTrackingTests
         var leftA = "";
         var leftB = "";
 
-        var bA = DefaultBinder.Bind ( ( ) => leftA == obj.StringValue );
-        var bB = DefaultBinder.Bind ( ( ) => leftB == obj.StringValue + "..." );
+        var bA = Binder.Default.Bind ( ( ) => leftA == obj.StringValue );
+        var bB = Binder.Default.Bind ( ( ) => leftB == obj.StringValue + "..." );
 
         Assert.Equal ( 1, obj.StringValueChangedCount );
 
@@ -146,7 +146,7 @@ public class ChangeTrackingTests
         var obj = new PropertyChangedEventObject {StringValue = "Hello",};
         var left = "";
 
-        var b = DefaultBinder.Bind ( ( ) => left == obj.StringValue );
+        var b = Binder.Default.Bind ( ( ) => left == obj.StringValue );
 
         Assert.Equal ( 1, obj.StringValueChangedCount );
 
@@ -228,7 +228,7 @@ public class ChangeTrackingTests
         var obj = new NotifyPropertyChangedEventObject {StringValue = "Hello",};
         var left = "";
 
-        DefaultBinder.Bind ( ( ) => left == obj.StringValue );
+        Binder.Default.Bind ( ( ) => left == obj.StringValue );
 
         Assert.Equal ( 1, obj.PropertyChangedCount );
 
@@ -245,7 +245,7 @@ public class ChangeTrackingTests
         var obj = new NotifyPropertyChangedEventObject {StringValue = "Hello",};
         var left = "";
 
-        var b = DefaultBinder.Bind ( ( ) => left == obj.StringValue );
+        var b = Binder.Default.Bind ( ( ) => left == obj.StringValue );
 
         Assert.Equal ( 1, obj.PropertyChangedCount );
 
@@ -310,7 +310,7 @@ public class ChangeTrackingTests
         var obj = new NotEventHandlerObject {StringValue = "Hello",};
         var left = "";
 
-        var b = DefaultBinder.Bind ( ( ) => left == obj.StringValue );
+        var b = Binder.Default.Bind ( ( ) => left == obj.StringValue );
 
         Assert.Equal ( 1, obj.StringValueChangedCount );
 
@@ -340,13 +340,13 @@ public class ChangeTrackingTests
         var obj = new PlainObject {string_property = "Hello",};
         var left = "";
 
-        var b = DefaultBinder.Bind ( ( ) => left == obj.string_property );
+        var b = Binder.Default.Bind ( ( ) => left == obj.string_property );
 
         Assert.Equal ( obj.string_property, left );
 
         obj.string_property = "Goodbye";
 
-        DefaultBinder.Invalidate ( ( ) => obj.string_property );
+        Binder.Default.Invalidate ( ( ) => obj.string_property );
 
         Assert.Equal ( "Goodbye", left );
 
