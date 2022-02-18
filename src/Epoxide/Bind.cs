@@ -513,7 +513,7 @@ public sealed class Binding : IBinding
 
         side.Value = read ? value : null;
 
-        if ( value is not IAsyncResult )
+        if ( value is not IBindableTask )
             side.Subscription.Subscribe ( );
 
         activeContainer = null;
@@ -523,7 +523,7 @@ public sealed class Binding : IBinding
 
     private bool TryReadAsync ( Side side, Action < Side > callback )
     {
-        if ( side.Value is IAsyncResult asyncResult )
+        if ( side.Value is IBindableTask asyncResult )
         {
             ReadAsync ( side, asyncResult, callback );
             return true;
@@ -532,7 +532,7 @@ public sealed class Binding : IBinding
         return false;
     }
 
-    private async void ReadAsync ( Side side, IAsyncResult asyncResult, Action < Side > callback )
+    private async void ReadAsync ( Side side, IBindableTask asyncResult, Action < Side > callback )
     {
         var value = await asyncResult.Run ( );
 
@@ -542,7 +542,7 @@ public sealed class Binding : IBinding
             {
                 side.Value = asyncResult.RunSelector ( value );
 
-                if ( side.Value is IAsyncResult subAsyncResult )
+                if ( side.Value is IBindableTask subAsyncResult )
                     ReadAsync ( side, subAsyncResult, callback );
                 else
                     callback ( side );
@@ -552,7 +552,7 @@ public sealed class Binding : IBinding
         {
             side.Value = value;
 
-            if ( side.Value is IAsyncResult subAsyncResult )
+            if ( side.Value is IBindableTask subAsyncResult )
                 ReadAsync ( side, subAsyncResult, callback );
             else
                 callback ( side );

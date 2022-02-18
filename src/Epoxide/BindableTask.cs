@@ -3,18 +3,18 @@
 namespace Epoxide;
 
 // TODO: Add IAsyncEnumerable support
-public static class AsyncResult
+public static class BindableTask
 {
     public static object? Create < T, TResult > ( this Task < T > source, Expression expression, Func< T, TResult >? selector, CancellationToken cancellationToken )
     {
         if ( source == null )
             throw new ArgumentNullException ( nameof ( source ) );
 
-        return new AsyncResult < T, TResult > ( source, expression, selector, cancellationToken );
+        return new BindableTask < T, TResult > ( source, expression, selector, cancellationToken );
     }
 }
 
-public interface IAsyncResult
+public interface IBindableTask
 {
     Expression?       Selector          { get; }
     CancellationToken CancellationToken { get; }
@@ -23,9 +23,9 @@ public interface IAsyncResult
     object?          RunSelector ( object? result );
 }
 
-public class AsyncResult < T, TResult > : IAsyncResult
+public sealed class BindableTask < T, TResult > : IBindableTask
 {
-    public AsyncResult ( Task < T > task, Expression selector, Func < T, TResult >? compiledSelector, CancellationToken cancellationToken )
+    public BindableTask ( Task < T > task, Expression selector, Func < T, TResult >? compiledSelector, CancellationToken cancellationToken )
     {
         Task              = task;
         Selector          = selector;
