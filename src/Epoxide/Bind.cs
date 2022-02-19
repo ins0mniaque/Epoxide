@@ -1,4 +1,3 @@
-using System.Collections.Specialized;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -23,12 +22,16 @@ public interface IBinder
 {
     IBinderServices Services { get; }
 
-    IBinding Bind ( );
-    IBinding Bind ( Expression specifications );
+    IBinding < TSource > Bind < TSource, T > ( TSource source, Expression < Func < TSource, T > > specifications );
 }
 
 public static class BinderExtensions
 {
+    public static IBinding Bind < T > ( this IBinder binder, Expression < Func < T > > specifications )
+    {
+        return binder.Bind ( null, Expression.Lambda < Func < object?, T > > ( specifications.Body, CachedExpressionCompiler.UnusedParameter ) );
+    }
+
     public static void Invalidate ( this IBinder binder, Expression expression )
     {
         binder.Services.Invalidate ( expression );
@@ -73,21 +76,16 @@ public class Binder : IBinder
 
     public IBinderServices Services { get; }
 
-    public IBinding Bind ( )
+    public IBinding < TSource > Bind < TSource, T > ( TSource source, Expression < Func < TSource, T > > specifications )
     {
-        return new CompositeBinding ( Services, Enumerable.Empty < IBinding > ( ) );
-    }
-
-    public IBinding Bind ( Expression specifications )
-    {
-        var binding = Parse ( specifications );
+        var binding = Parse ( source, specifications.Parameters [ 0 ], specifications );
 
         binding.Bind ( );
 
         return binding;
     }
 
-    IBinding Parse ( Expression expr )
+    IBinding < TSource > Parse < TSource > ( TSource source, ParameterExpression parameter, Expression expr )
     {
         if ( expr.NodeType == ExpressionType.Lambda )
             expr = ( (LambdaExpression) expr ).Body;
@@ -100,8 +98,12 @@ public class Binder : IBinder
             {
                 // TODO: Validate arguments
                 var name = m.Arguments.Count == 3 ? (string) ( (ConstantExpression) m.Arguments [ 1 ] ).Value : b.EventName;
+                var lamb = (LambdaExpression) m.Arguments [ ^1 ];
+                var args = lamb.Parameters.Count > 0 ? lamb.Parameters [ 0 ].Type : typeof ( object );
 
-                return new EventBinding ( Services, m.Arguments[ 0 ], name, Parse ( m.Arguments [ ^1 ] ) );
+                // TODO: Call generic version of Parse (EventArgs type)
+                throw new NotImplementedException ( );
+                // return new EventBinding < TSource > ( Services, m.Arguments[ 0 ], parameter, name, Parse ( Activator.CreateInstance(args), lamb.Parameters [ 0 ], lamb ) );
             }
         }
 
@@ -128,13 +130,13 @@ public class Binder : IBinder
 
             parts.Reverse ( );
 
-            return new CompositeBinding ( Services, parts.Select ( Parse ) );
+            return new CompositeBinding < TSource > ( Services, source, parts.Select ( part => Parse ( source, parameter, part ) ) );
         }
 
         if ( expr.NodeType == ExpressionType.Equal )
         {
             var b = (BinaryExpression) expr;
-            return new Binding ( Services, b.Left, b.Right );
+            return new Binding < TSource > ( Services, source, parameter, b.Left, b.Right );
         }
 
         throw new FormatException ( $"Invalid binding format: { expr }" );
@@ -151,6 +153,11 @@ public interface IBinding : IDisposable
 
     void Attach ( IDisposable disposable );
     bool Detach ( IDisposable disposable );
+}
+
+public interface IBinding < TSource > : IBinding
+{
+    TSource Source { get; set; }
 }
 
 // TODO: Merge all helper methods as extensions
@@ -219,14 +226,70 @@ public interface IScheduler
 // TODO: Add state to evaluation and Binding < TSource >
 public abstract class ExpressionAccessor
 {
-    public static ExpressionAccessor Create ( Expression expression )
+    public static ExpressionAccessor < TSource > Create < TSource > ( ParameterExpression parameter, Expression expression )
     {
         if ( ExprHelper.IsWritable ( expression ) )
-            return new Writable ( expression );
+            return new Writable < TSource > ( parameter, expression );
 
-        return new Readable ( expression );
+        return new Readable < TSource > ( parameter, expression );
     }
 
+    protected class Readable < T > : ExpressionAccessor < T >
+    {
+        public Readable ( ParameterExpression parameter, Expression expression ) : base ( expression )
+        {
+            Parameter = parameter;
+            CanAdd    = ExprHelper.GetGenericInterfaceArguments ( expression.Type, typeof ( ICollection < > ) ) != null;
+        }
+
+        protected ParameterExpression Parameter { get; }
+
+        // TODO: Convert only if necessary
+        private Func < T, object? >? read;
+        public  Func < T, object? >  Read => read ??= CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert ( Expression.AddSentinel ( ), typeof ( object ) ), Parameter ) );
+
+        public override bool CanAdd { get; }
+        public override bool CanWrite => false;
+
+        public override bool TryRead ( T source, out object? value )
+        {
+            value = Read ( source );
+
+            return value != Sentinel.Value;
+        }
+
+        public override bool TryWrite ( T source, object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
+        {
+            throw new InvalidOperationException ( $"Expression { Expression } is not writable." );
+        }
+    }
+
+    protected class Writable < T > : Readable < T >
+    {
+        public Writable ( ParameterExpression parameter, Expression expression ) : base ( parameter, expression ) { }
+
+        // TODO: Convert only if necessary
+        private Func < T, object? >? readTarget;
+        public  Func < T, object? >  ReadTarget => readTarget ??= CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert ( ( (MemberExpression) Expression ).Expression.AddSentinel ( ), typeof ( object ) ), Parameter ) );
+
+        public override bool CanWrite => true;
+
+        public override bool TryWrite ( T source, object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
+        {
+            member = ( (MemberExpression) Expression ).Member;
+            target = ReadTarget ( source );
+            if ( target == null || target == Sentinel.Value )
+                return false;
+
+            member.SetValue ( target, value );
+
+            return true;
+        }
+    }
+}
+
+public abstract class ExpressionAccessor < TSource >
+{
     protected ExpressionAccessor ( Expression expression )
     {
         Expression = expression;
@@ -237,51 +300,51 @@ public abstract class ExpressionAccessor
     public abstract bool CanAdd   { get; }
     public abstract bool CanWrite { get; }
 
-    public abstract bool TryRead  ( out object? value );
-    public abstract bool TryWrite ( object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member );
+    public abstract bool TryRead  ( TSource source, out object? value );
+    public abstract bool TryWrite ( TSource source, object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member );
 
-    private class Readable : ExpressionAccessor
+    private class Readable < T > : ExpressionAccessor < T >
     {
-        public Readable ( Expression expression ) : base ( expression )
+        public Readable ( ParameterExpression parameter, Expression expression ) : base ( expression )
         {
-            CanAdd = ExprHelper.GetGenericInterfaceArguments ( expression.Type, typeof ( ICollection < > ) ) != null;
+            Parameter = parameter;
+            CanAdd    = ExprHelper.GetGenericInterfaceArguments ( expression.Type, typeof ( ICollection < > ) ) != null;
         }
 
-        private Expression? sentinelExpression;
-        public  Expression  SentinelExpression => sentinelExpression ??= Expression.AddSentinel ( );
+        protected ParameterExpression Parameter { get; }
+
+        private Func < T, object? >? read;
+        public  Func < T, object? >  Read => read ??= CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.AddSentinel ( ) ) );
 
         public override bool CanAdd { get; }
         public override bool CanWrite => false;
 
-        // TODO: Cache compilation
-        public override bool TryRead ( out object? value )
+        public override bool TryRead ( T source, out object? value )
         {
-            value = CachedExpressionCompiler.Evaluate ( SentinelExpression );
+            value = Read ( source );
 
             return value != Sentinel.Value;
         }
 
-        public override bool TryWrite ( object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
+        public override bool TryWrite ( T source, object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
         {
             throw new InvalidOperationException ( $"Expression { Expression } is not writable." );
         }
     }
 
-    private class Writable : Readable
+    private class Writable < T > : Readable < T >
     {
-        public Writable ( Expression expression ) : base ( expression ) { }
+        public Writable ( ParameterExpression parameter, Expression expression ) : base ( parameter, expression ) { }
 
-        private Expression? targetSentinelExpression;
+        private Func < T, object? >? readTarget;
+        public  Func < T, object? >  ReadTarget => readTarget ??= CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( ( (MemberExpression) Expression ).Expression.AddSentinel ( ) ) );
 
         public override bool CanWrite => true;
 
-        // TODO: Cache compilation
-        public override bool TryWrite ( object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
+        public override bool TryWrite ( T source, object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
         {
-            targetSentinelExpression ??= ( (MemberExpression) Expression ).Expression.AddSentinel ( );
-
             member = ( (MemberExpression) Expression ).Member;
-            target = CachedExpressionCompiler.Evaluate ( targetSentinelExpression );
+            target = ReadTarget ( source );
             if ( target == null || target == Sentinel.Value )
                 return false;
 
@@ -304,22 +367,28 @@ public class NoScheduler : IScheduler
 }
 
 // Internal
-public sealed class Trigger
+public sealed class Trigger < TSource >
 {
-    public ExpressionAccessor Accessor;
+    public ExpressionAccessor < TSource > Accessor;
     public MemberInfo Member;
     public IDisposable? Subscription;
 
-    public static List < Trigger > ExtractTriggers ( Expression s )
+    public static List < Trigger < TSource > > ExtractTriggers ( ParameterExpression parameter, Expression s )
     {
-        var extractor = new TriggerExtractorVisitor ( );
+        var extractor = new TriggerExtractorVisitor ( parameter );
         extractor.Visit ( s );
         return extractor.Triggers;
     }
 
     private class TriggerExtractorVisitor : ExpressionVisitor
     {
-        public List < Trigger > Triggers { get; } = new ( );
+        public TriggerExtractorVisitor ( ParameterExpression parameter )
+        {
+            Parameter = parameter;
+        }
+
+        public List < Trigger < TSource > > Triggers  { get; } = new ( );
+        public ParameterExpression          Parameter { get; }
 
         protected override Expression VisitLambda < T > ( Expression < T > node ) => node;
 
@@ -327,7 +396,7 @@ public sealed class Trigger
         {
             base.VisitMember ( node );
 
-            Triggers.Add ( new Trigger { Accessor = ExpressionAccessor.Create ( node.Expression ), Member = node.Member } );
+            Triggers.Add ( new Trigger < TSource > { Accessor = ExpressionAccessor.Create < TSource > ( Parameter, node.Expression ), Member = node.Member } );
 
             return node;
         }
@@ -337,31 +406,35 @@ public sealed class Trigger
         // {
         //     base.VisitMethodCall ( node );
         // 
-        //     Triggers.Add ( new Trigger { Accessor = ExpressionAccessor.Create ( node ), Member = node.Method } );
+        //     Triggers.Add ( new Trigger < TSource > { Accessor = ExpressionAccessor.Create < TSource > ( Parameter, node ), Member = node.Method } );
         // 
         //     return node;
         // }
     }
 }
 
-public sealed class ExpressionSubscription : IDisposable
+public sealed class ExpressionSubscription<TSource> : IDisposable
 {
     readonly IBinderServices services;
     readonly Expression expression;
-    readonly List<Trigger> triggers;
+    readonly List<Trigger<TSource>> triggers;
     readonly MemberChangedCallback callback;
 
-    public ExpressionSubscription ( IBinderServices services, Expression expression, MemberChangedCallback callback )
+    TSource source;
+
+    public ExpressionSubscription ( IBinderServices services, ParameterExpression parameter, Expression expression, MemberChangedCallback callback )
     {
         this.services = services;
         this.expression = expression;
         this.callback = callback;
 
-        triggers = Trigger.ExtractTriggers ( expression );
+        triggers = Trigger<TSource>.ExtractTriggers ( parameter, expression );
     }
 
-    public void Subscribe ( )
+    public void Subscribe ( TSource source )
     {
+        this.source = source;
+
         foreach ( var t in triggers )
         {
             t.Subscription?.Dispose ( );
@@ -369,9 +442,9 @@ public sealed class ExpressionSubscription : IDisposable
         }
     }
 
-    private void ReadAndSubscribe ( Trigger t )
+    private void ReadAndSubscribe ( Trigger < TSource > t )
     {
-        if ( t.Accessor.TryRead ( out var target ) && target != null )
+        if ( t.Accessor.TryRead ( source, out var target ) && target != null )
             t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, callback );
         else
             t.Subscription = null;
@@ -389,7 +462,7 @@ public sealed class ExpressionSubscription : IDisposable
     public void Dispose ( ) => Unsubscribe ( );
 }
 
-public sealed class Binding : IBinding
+public sealed class Binding < TSource > : IBinding < TSource >
 {
     private readonly CompositeDisposable disposables;
 
@@ -397,11 +470,12 @@ public sealed class Binding : IBinding
     private readonly Side rightSide;
     private readonly Side initialSide;
 
-    public Binding ( IBinderServices services, Expression left, Expression right )
+    public Binding ( IBinderServices services, TSource source, ParameterExpression parameter, Expression left, Expression right )
     {
         disposables = new CompositeDisposable ( 4 );
 
         Services = services;
+        Source   = source;
 
         var binding = Expression.Constant ( this );
 
@@ -413,8 +487,8 @@ public sealed class Binding : IBinding
         right = new EnumerableToBindableEnumerableVisitor ( binding )  .Visit ( right );
         right = new AggregateInvalidatorVisitor           ( )          .Visit ( right );
 
-        leftSide  = new Side ( services, left,  ScheduleReadThenWriteToOtherSide );
-        rightSide = new Side ( services, right, ScheduleReadThenWriteToOtherSide );
+        leftSide  = new Side ( services, parameter, left,  ScheduleReadThenWriteToOtherSide );
+        rightSide = new Side ( services, parameter, right, ScheduleReadThenWriteToOtherSide );
 
         leftSide .OtherSide = rightSide;
         rightSide.OtherSide = leftSide;
@@ -454,9 +528,11 @@ public sealed class Binding : IBinding
 
     public IBinderServices Services { get; }
 
-    public ExpressionAccessor Left  => leftSide .Accessor;
-    public ExpressionAccessor Right => rightSide.Accessor;
-    public object?            Value { get; private set; }
+    // TODO: Invalidate on source change
+    public TSource                        Source { get; set; }
+    public ExpressionAccessor < TSource > Left   => leftSide .Accessor;
+    public ExpressionAccessor < TSource > Right  => rightSide.Accessor;
+    public object?                        Value  { get; private set; }
 
     public void Bind ( )
     {
@@ -490,11 +566,11 @@ public sealed class Binding : IBinding
 
     private void WriteFromOtherSide ( Side side )
     {
-        if ( side.Accessor.TryWrite ( side.OtherSide.Value, out var target, out var member ) )
+        if ( side.Accessor.TryWrite ( Source, side.OtherSide.Value, out var target, out var member ) )
             if ( ! Equals ( Value, Value = side.OtherSide.Value ) )
                 Services.MemberSubscriber.Invalidate ( side.Accessor.Expression, member );
 
-        side.Subscription.Subscribe ( );
+        side.Subscription.Subscribe ( Source );
     }
 
     private void ReadThenReadThenAddFromOtherSide ( Side side )
@@ -533,12 +609,12 @@ public sealed class Binding : IBinding
 
         activeContainer = side.Container;
 
-        var read = side.Accessor.TryRead ( out var value );
+        var read = side.Accessor.TryRead ( Source, out var value );
 
         side.Value = read ? value : null;
 
         if ( value is not IBindableTask )
-            side.Subscription.Subscribe ( );
+            side.Subscription.Subscribe ( Source );
 
         activeContainer = null;
 
@@ -603,29 +679,29 @@ public sealed class Binding : IBinding
 
     private class Side
     {
-        public Side ( IBinderServices services, Expression expression, Action < Side > callback )
+        public Side ( IBinderServices services, ParameterExpression parameter, Expression expression, Action < Side > callback )
         {
-            Accessor     = ExpressionAccessor.Create ( expression );
+            Accessor     = ExpressionAccessor.Create < TSource > ( parameter, expression );
             Callback     = callback;
             Container    = new CompositeDisposable ( );
-            Subscription = new ExpressionSubscription ( services, expression, (o, m) => Callback ( this ) );
+            Subscription = new ExpressionSubscription < TSource > ( services, parameter, expression, (o, m) => Callback ( this ) );
         }
 
-        public ExpressionAccessor     Accessor     { get; }
-        public Action < Side >        Callback     { get; set; }
-        public CompositeDisposable    Container    { get; }
-        public ExpressionSubscription Subscription { get; }
-        public Side                   OtherSide    { get; set; }
-        public object?                Value        { get; set; }
+        public ExpressionAccessor < TSource >     Accessor     { get; }
+        public Action < Side >                    Callback     { get; set; }
+        public CompositeDisposable                Container    { get; }
+        public ExpressionSubscription < TSource > Subscription { get; }
+        public Side                               OtherSide    { get; set; }
+        public object?                            Value        { get; set; }
     }
 }
 
-public sealed class EventBinding : IBinding
+public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >
 {
     readonly CompositeDisposable disposables;
     readonly IBinding            binding;
 
-    public EventBinding ( IBinderServices services, Expression source, string eventName, IBinding binding )
+    public EventBinding ( IBinderServices services, Expression source, ParameterExpression parameter, string eventName, IBinding < TArgs > binding )
     {
         disposables = new CompositeDisposable ( 1 );
 
@@ -638,6 +714,9 @@ public sealed class EventBinding : IBinding
 
     public IBinderServices Services { get; }
 
+    // TODO: Invalidate on source change
+    public TSource Source { get; set; }
+
     public void Bind   ( ) => binding.Bind   ( );
     public void Unbind ( ) => binding.Unbind ( );
 
@@ -646,22 +725,45 @@ public sealed class EventBinding : IBinding
     public void Dispose ( )                        => disposables.Dispose ( );
 }
 
-public sealed class CompositeBinding : IBinding
+public sealed class ContainerBinding : IBinding
 {
-    readonly CompositeDisposable disposables;
+    private readonly CompositeDisposable disposables;
 
-    public CompositeBinding ( IBinderServices services ) : this ( services, Enumerable.Empty < IBinding > ( ) ) { }
-    public CompositeBinding ( IBinderServices services, IEnumerable < IBinding > bindings )
+    public ContainerBinding ( IBinderServices services )
+    {
+        disposables = new CompositeDisposable ( );
+        Services    = services;
+    }
+
+    public IBinderServices Services { get; }
+
+    public void Bind   ( ) { }
+    public void Unbind ( ) { }
+
+    public void Attach  ( IDisposable disposable ) => disposables.Add     ( disposable );
+    public bool Detach  ( IDisposable disposable ) => disposables.Remove  ( disposable );
+    public void Dispose ( )                        => disposables.Dispose ( );
+}
+
+public sealed class CompositeBinding < TSource > : IBinding < TSource >
+{
+    private readonly CompositeDisposable disposables;
+
+    public CompositeBinding ( IBinderServices services, TSource source, IEnumerable < IBinding > bindings )
     {
         disposables = new CompositeDisposable ( );
 
         Services = services;
+        Source   = source;
 
         foreach ( var binding in bindings )
             disposables.Add ( binding );
     }
 
     public IBinderServices Services { get; }
+
+    // TODO: Copy source to bindings on change
+    public TSource Source { get; set; }
 
     public void Bind ( )
     {

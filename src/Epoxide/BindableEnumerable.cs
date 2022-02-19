@@ -302,8 +302,8 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 
 	private readonly Expression<Func<T, bool>> _predicate;
 	private Func<T, bool>? _compiledPredicate;
-	private List<Trigger>? _triggersSource;
-	private List<List<Trigger>>? _triggers;
+	private List<Trigger<T>>? _triggersSource;
+	private List<List<Trigger<T>>>? _triggers;
 
     protected override IEnumerator<T> GetEnumerator ( )
     {
@@ -322,9 +322,9 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
             }
         }
 
-		_triggersSource ??= Trigger.ExtractTriggers ( _predicate.Body );
+		_triggersSource ??= Trigger<T>.ExtractTriggers ( _predicate.Parameters[0], _predicate.Body );
 
-		_triggers = list.Select ( _ => _triggersSource.Select ( t => new Trigger { Accessor = t.Accessor, Member = t.Member } ).ToList ( ) )
+		_triggers = list.Select ( _ => _triggersSource.Select ( t => new Trigger <T> { Accessor = t.Accessor, Member = t.Member } ).ToList ( ) )
 						.ToList ( );
 
 		for ( var t = 0; t < _triggersSource.Count; t++ )
@@ -353,12 +353,12 @@ public static class BindableEnumerable
 	// TODO: Use weak binder here
 	public static IBindableEnumerable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source)
     {
-		return new BindableEnumerable<TElement>(new CompositeBinding ( Binder.Default.Services ), source);
+		return new BindableEnumerable<TElement>(new ContainerBinding(Binder.Default.Services), source);
     }
 
 	public static IBindableEnumerable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source, out IBinding binding)
     {
-		return new BindableEnumerable<TElement>(binding = new CompositeBinding ( Binder.Default.Services ), source);
+		return new BindableEnumerable<TElement>(binding = new ContainerBinding(Binder.Default.Services), source);
     }
 
 	public static IBindableEnumerable<TElement> AsBindable<TElement>(this IEnumerable<TElement> source, IBinding binding)
