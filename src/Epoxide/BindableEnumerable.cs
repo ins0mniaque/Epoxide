@@ -322,15 +322,16 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
             }
         }
 
-		_triggersSource ??= Trigger<T>.ExtractTriggers ( _predicate.Parameters[0], _predicate.Body );
+		_triggersSource ??= Trigger < T >.ExtractTriggers ( _predicate );
 
 		_triggers = list.Select ( _ => _triggersSource.Select ( t => new Trigger <T> { Accessor = t.Accessor, Member = t.Member } ).ToList ( ) )
 						.ToList ( );
 
+		// TODO: Refactor using ExpressionSubscriptions
 		for ( var t = 0; t < _triggersSource.Count; t++ )
         {
 			var trigger = _triggersSource [ t ];
-			var c = CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert(trigger.Accessor.Expression, typeof(object)), _predicate.Parameters ) );
+			var c = CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert(trigger.Accessor.Expression.Body, typeof(object)), trigger.Accessor.Expression.Parameters ) );
 
 			for ( var index = 0; index < list.Count; index++ )
 				_triggers [ index ] [ t ].Subscription = Binding.Services.MemberSubscriber.Subscribe ( c ( list [ index ] ), trigger.Member, Callback );
