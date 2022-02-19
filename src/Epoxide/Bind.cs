@@ -80,9 +80,6 @@ public class Binder : IBinder
 
     public IBinding Bind ( Expression specifications )
     {
-        if ( specifications.NodeType == ExpressionType.Lambda )
-            specifications = ( (LambdaExpression) specifications ).Body;
-
         var binding = Parse ( specifications );
 
         binding.Bind ( );
@@ -92,6 +89,22 @@ public class Binder : IBinder
 
     IBinding Parse ( Expression expr )
     {
+        if ( expr.NodeType == ExpressionType.Lambda )
+            expr = ( (LambdaExpression) expr ).Body;
+
+        if ( expr.NodeType == ExpressionType.Call )
+        {
+            var m = (MethodCallExpression) expr;
+            var b = m.Method.GetCustomAttribute < BindableEventAttribute > ( );
+            if ( b != null )
+            {
+                // TODO: Validate arguments
+                var name = m.Arguments.Count == 3 ? (string) ( (ConstantExpression) m.Arguments [ 1 ] ).Value : b.EventName;
+
+                return new EventBinding ( Services, m.Arguments[ 0 ], name, Parse ( m.Arguments [ ^1 ] ) );
+            }
+        }
+
         if ( expr.NodeType == ExpressionType.AndAlso )
         {
             var b = (BinaryExpression) expr;
@@ -124,7 +137,7 @@ public class Binder : IBinder
             return new Binding ( Services, b.Left, b.Right );
         }
 
-        throw new NotSupportedException ( "Only equality bindings are supported." );
+        throw new FormatException ( $"Invalid binding format: { expr }" );
     }
 }
 
@@ -203,6 +216,7 @@ public interface IScheduler
     IDisposable? Schedule < TState > ( Expression expression, TState state, Action < TState > action );
 }
 
+// TODO: Add state to evaluation and Binding < TSource >
 public abstract class ExpressionAccessor
 {
     public static ExpressionAccessor Create ( Expression expression )
@@ -311,12 +325,22 @@ public sealed class Trigger
 
         protected override Expression VisitMember ( MemberExpression node )
         {
-            Visit ( node.Expression );
+            base.VisitMember ( node );
 
             Triggers.Add ( new Trigger { Accessor = ExpressionAccessor.Create ( node.Expression ), Member = node.Member } );
 
             return node;
         }
+
+        // TODO: Add method support?
+        // protected override Expression VisitMethodCall ( MethodCallExpression node )
+        // {
+        //     base.VisitMethodCall ( node );
+        // 
+        //     Triggers.Add ( new Trigger { Accessor = ExpressionAccessor.Create ( node ), Member = node.Method } );
+        // 
+        //     return node;
+        // }
     }
 }
 
@@ -594,6 +618,32 @@ public sealed class Binding : IBinding
         public Side                   OtherSide    { get; set; }
         public object?                Value        { get; set; }
     }
+}
+
+public sealed class EventBinding : IBinding
+{
+    readonly CompositeDisposable disposables;
+    readonly IBinding            binding;
+
+    public EventBinding ( IBinderServices services, Expression source, string eventName, IBinding binding )
+    {
+        disposables = new CompositeDisposable ( 1 );
+
+        Services = services;
+
+        disposables.Add ( this.binding = binding );
+
+        // TODO: Read source, hook event
+    }
+
+    public IBinderServices Services { get; }
+
+    public void Bind   ( ) => binding.Bind   ( );
+    public void Unbind ( ) => binding.Unbind ( );
+
+    public void Attach  ( IDisposable disposable ) => disposables.Add     ( disposable );
+    public bool Detach  ( IDisposable disposable ) => disposables.Remove  ( disposable );
+    public void Dispose ( )                        => disposables.Dispose ( );
 }
 
 public sealed class CompositeBinding : IBinding

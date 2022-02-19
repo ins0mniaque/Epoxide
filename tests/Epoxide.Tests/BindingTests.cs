@@ -470,34 +470,11 @@ public class BindingTests
     }
 }
 
-[ AttributeUsage ( AttributeTargets.Method ) ]
-public sealed class BindableEventAttribute : Attribute
+public static class CustomBindableEvent
 {
-    public BindableEventAttribute(string eventName, Type eventHandlerType)
-    {
-        EventName        = eventName;
-        EventHandlerType = eventHandlerType;
-    }
+    [ BindableEvent ( nameof ( BindingTests.Button.Click ) ) ]
+    public static bool Clicked ( this BindingTests.Button button, Func < bool > binding ) => throw new NotImplementedException ( );
 
-    public string EventName        { get; }
-    public Type   EventHandlerType { get; }
-}
-
-public static class BindableEvent
-{
-    [BindableEvent(nameof(BindingTests.Button.Click), typeof(EventHandler))]
-    public static bool Clicked ( this BindingTests.Button button, Func < EventArgs, bool > d )
-    {
-        throw new NotImplementedException();
-    }
-
-    public static bool Event ( this BindingTests.Button button, string name, Func < bool > d )
-    {
-        throw new NotImplementedException();
-    }
-
-    public static bool Event < TArgs > ( this BindingTests.Button button, string name, Func < TArgs, bool > d )
-    {
-        throw new NotImplementedException();
-    }
+    [ BindableEvent ( nameof ( BindingTests.Button.Click ) ) ]
+    public static bool Clicked ( this BindingTests.Button button, Func < EventArgs, bool > binding ) => throw new NotImplementedException ( );
 }

@@ -2,7 +2,7 @@
 
 namespace Epoxide;
 
-// TODO: Add IAsyncEnumerable support
+// TODO: Add IAsyncEnumerable/IObservable support
 public static class BindableTask
 {
     public static object? Create < T, TResult > ( this Task < T > source, Expression expression, Func< T, TResult >? selector, CancellationToken cancellationToken )
