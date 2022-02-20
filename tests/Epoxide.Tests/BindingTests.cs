@@ -470,6 +470,9 @@ public class BindingTests
     }
 }
 
+// TODO: Detect .Event ( ) usage and generate source
+//       Generate warning for usage in generator
+//       Refactor in analyzer (or in source generator if possible)
 public static class CustomBindableEvent
 {
     [ BindableEvent ( nameof ( BindingTests.Button.Click ) ) ]

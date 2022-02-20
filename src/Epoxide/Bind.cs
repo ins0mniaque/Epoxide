@@ -374,6 +374,7 @@ public sealed class Trigger < TSource >
     }
 }
 
+// TODO: Refactor into ExpressionSubscriber to allow subscribing multiple sources
 public sealed class ExpressionSubscription<TSource> : IDisposable
 {
     readonly IBinderServices services;
@@ -394,6 +395,7 @@ public sealed class ExpressionSubscription<TSource> : IDisposable
     {
         this.source = source;
 
+        // TODO: Group by scheduler, then schedule
         foreach ( var t in triggers )
         {
             t.Subscription?.Dispose ( );
