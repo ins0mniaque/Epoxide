@@ -85,6 +85,8 @@ public class Binder : IBinder
         return binding;
     }
 
+    private static MethodInfo? parse;
+
     IBinding < TSource > Parse < TSource > ( TSource source, LambdaExpression lambda )
     {
         var expr = lambda.Body;
@@ -96,13 +98,23 @@ public class Binder : IBinder
             if ( b != null )
             {
                 // TODO: Validate arguments
-                var name = m.Arguments.Count == 3 ? (string) ( (ConstantExpression) m.Arguments [ 1 ] ).Value : b.EventName;
-                var lamb = (LambdaExpression) m.Arguments [ ^1 ];
-                var args = lamb.Parameters.Count > 0 ? lamb.Parameters [ 0 ].Type : typeof ( object );
+                var eventName     = m.Arguments.Count == 3 ? (string) ( (ConstantExpression) m.Arguments [ 1 ] ).Value : b.EventName;
+                var eventSource   = Expression.Lambda ( m.Arguments [ 0 ], lambda.Parameters );
+                var eventLambda   = (LambdaExpression) m.Arguments [ ^1 ];
+                var eventArgsType = eventLambda.Parameters.Count > 0 ? eventLambda.Parameters [ 0 ].Type : typeof ( object );
 
-                // TODO: Call generic version of Parse (EventArgs type)
-                throw new NotImplementedException ( );
-                // return new EventBinding < TSource > ( Services, m.Arguments[ 0 ], parameter, name, Parse ( Activator.CreateInstance(args), lamb.Parameters [ 0 ], lamb ) );
+                if ( eventLambda.Parameters.Count == 0 )
+                    eventLambda = Expression.Lambda ( eventLambda.Body, Expression.Parameter ( eventArgsType, "e" ) );
+
+                parse ??= new Func < TSource, LambdaExpression, IBinding < TSource > > ( Parse ).GetMethodInfo ( ).GetGenericMethodDefinition ( );
+
+                var eventBinding     = parse.MakeGenericMethod ( eventArgsType ).Invoke ( this, new [ ] { Activator.CreateInstance ( eventArgsType ), eventLambda } );
+                var eventBindingType = typeof ( EventBinding < , > ).MakeGenericType ( typeof ( TSource ), eventArgsType );
+
+                // TODO: Create static method to cache reflection
+                var eventBindingCtor = eventBindingType.GetConstructor ( new [ ] { typeof ( IBinderServices ), typeof ( LambdaExpression ), typeof ( string ), typeof ( IBinding < > ).MakeGenericType ( eventArgsType ) } );
+
+                return (IBinding < TSource >) eventBindingCtor.Invoke ( new object [ ] { Services, eventSource, eventName, eventBinding } );
             }
         }
 
@@ -695,7 +707,7 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >
     readonly CompositeDisposable disposables;
     readonly IBinding            binding;
 
-    public EventBinding ( IBinderServices services, Expression source, ParameterExpression parameter, string eventName, IBinding < TArgs > binding )
+    public EventBinding ( IBinderServices services, LambdaExpression source, string eventName, IBinding < TArgs > binding )
     {
         disposables = new CompositeDisposable ( 1 );
 
