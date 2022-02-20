@@ -35,6 +35,11 @@ public sealed class CompositeDisposable : IDisposable
     }
 
     /// <summary>
+    /// Gets a value that indicates whether the object is disposed.
+    /// </summary>
+    public bool IsDisposed => Volatile.Read(ref _disposed);
+
+    /// <summary>
     /// Gets the number of disposables contained in the <see cref="CompositeDisposable"/>.
     /// </summary>
     public int Count => Volatile.Read(ref _count);
@@ -251,9 +256,4 @@ public sealed class CompositeDisposable : IDisposable
             return array;
         }
     }
-
-    /// <summary>
-    /// Gets a value that indicates whether the object is disposed.
-    /// </summary>
-    public bool IsDisposed => Volatile.Read(ref _disposed);
 }
