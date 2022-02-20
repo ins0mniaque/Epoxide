@@ -302,49 +302,33 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 
 	private readonly Expression<Func<T, bool>> _predicate;
 	private Func<T, bool>? _compiledPredicate;
-	private List<Trigger<T>>? _triggersSource;
-	private List<List<Trigger<T>>>? _triggers;
+	private ExpressionSubscriber<T> _subscriber;
+	private CompositeDisposable? _disposables;
 
-    protected override IEnumerator<T> GetEnumerator ( )
+    protected override IEnumerator < T > GetEnumerator ( )
     {
+		_subscriber        ??= new ExpressionSubscriber < T > ( Binding.Services, _predicate );
 		_compiledPredicate ??= CachedExpressionCompiler.Compile ( _predicate );
+
+		if ( _disposables == null )
+			Binding.Attach ( _disposables = new CompositeDisposable ( ) );
 
 		var list = new List < T > ( Parent );
 		if ( list.Count == 0 )
 			return list.GetEnumerator ( );
 
-		if ( _triggers != null )
-        {
-			foreach ( var t in _triggers.SelectMany ( _ => _ ) )
-            {
-				t.Subscription?.Dispose ( );
-				t.Subscription = null;
-            }
-        }
+		_disposables.Clear ( );
+		foreach ( var item in list )
+			_disposables.Add ( _subscriber.Subscribe ( item, Callback ) );
 
-		_triggersSource ??= Trigger < T >.ExtractTriggers ( _predicate );
+		return list.Where ( _compiledPredicate ).GetEnumerator ( );
 
-		_triggers = list.Select ( _ => _triggersSource.Select ( t => new Trigger <T> { Accessor = t.Accessor, Member = t.Member } ).ToList ( ) )
-						.ToList ( );
-
-		// TODO: Refactor using ExpressionSubscriptions
-		for ( var t = 0; t < _triggersSource.Count; t++ )
-        {
-			var trigger = _triggersSource [ t ];
-			var c = CachedExpressionCompiler.Compile ( Expression.Lambda < Func < T, object? > > ( Expression.Convert(trigger.Accessor.Expression.Body, typeof(object)), trigger.Accessor.Expression.Parameters ) );
-
-			for ( var index = 0; index < list.Count; index++ )
-				_triggers [ index ] [ t ].Subscription = Binding.Services.MemberSubscriber.Subscribe ( c ( list [ index ] ), trigger.Member, Callback );
-        }
-
-		// TODO: Get item and index
+		// TODO: Generate CollectionChange
 		// TODO: Scheduling
-		void Callback ( object target, MemberInfo member )
+		void Callback ( LambdaExpression expression, T source, object target, MemberInfo member )
         {
 			ReportChanges ( this, Enumerable.Repeat ( CollectionChange < T >.Invalidated ( ), 1 ) );
         }
-
-		return list.Where ( _compiledPredicate ).GetEnumerator ( );
     }
 }
 
