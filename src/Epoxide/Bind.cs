@@ -323,7 +323,7 @@ public class NoScheduler : IScheduler
     }
 }
 
-// Internal
+// TODO: Clean up and add clonable TriggerCollection
 public sealed class Trigger < TSource >
 {
     public ExpressionAccessor < TSource > Accessor;
@@ -374,26 +374,57 @@ public sealed class Trigger < TSource >
     }
 }
 
-// TODO: Refactor into ExpressionSubscriber to allow subscribing multiple sources
-public sealed class ExpressionSubscription<TSource> : IDisposable
+public delegate void ExpressionChangedCallback < TSource > ( LambdaExpression expression, TSource source, object target, MemberInfo member );
+
+public sealed class ExpressionSubscriber < TSource >
 {
     readonly IBinderServices services;
     readonly List<Trigger<TSource>> triggers;
-    readonly MemberChangedCallback callback;
 
-    TSource source;
-
-    public ExpressionSubscription ( IBinderServices services, LambdaExpression expression, MemberChangedCallback callback )
+    public ExpressionSubscriber ( IBinderServices services, LambdaExpression expression )
     {
         this.services = services;
-        this.callback = callback;
 
         triggers = Trigger < TSource >.ExtractTriggers ( expression );
     }
 
+    public IDisposable Subscribe ( TSource source, ExpressionChangedCallback < TSource > callback )
+    {
+        var triggers     = this.triggers.Select ( t => new Trigger < TSource > { Accessor = t.Accessor, Member = t.Member } ).ToList ( );
+        var subscription = new ExpressionSubscription < TSource > ( services, triggers, callback );
+
+        subscription.Subscribe ( source );
+
+        return subscription;
+    }
+}
+
+public sealed class ExpressionSubscription < TSource > : IDisposable
+{
+    readonly IBinderServices services;
+    readonly List<Trigger<TSource>> triggers;
+
+    readonly ExpressionChangedCallback < TSource > callback;
+
+    public ExpressionSubscription ( IBinderServices services, LambdaExpression expression, ExpressionChangedCallback < TSource > callback )
+    {
+        this.services = services;
+        this.callback = callback;
+        this.triggers = Trigger < TSource >.ExtractTriggers ( expression );
+    }
+
+    public ExpressionSubscription ( IBinderServices services, List<Trigger<TSource>> triggers, ExpressionChangedCallback < TSource > callback )
+    {
+        this.services = services;
+        this.callback = callback;
+        this.triggers = triggers;
+    }
+
+    public TSource Source { get; private set; }
+
     public void Subscribe ( TSource source )
     {
-        this.source = source;
+        Source = source;
 
         // TODO: Group by scheduler, then schedule
         foreach ( var t in triggers )
@@ -405,8 +436,8 @@ public sealed class ExpressionSubscription<TSource> : IDisposable
 
     private void ReadAndSubscribe ( Trigger < TSource > t )
     {
-        if ( t.Accessor.TryRead ( source, out var target ) && target != null )
-            t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, callback );
+        if ( t.Accessor.TryRead ( Source, out var target ) && target != null )
+            t.Subscription = services.MemberSubscriber.Subscribe ( target, t.Member, (o, m) => callback ( t.Accessor.Expression, Source, o, m ) );
         else
             t.Subscription = null;
     }
@@ -423,7 +454,6 @@ public sealed class ExpressionSubscription<TSource> : IDisposable
     public void Dispose ( ) => Unsubscribe ( );
 }
 
-// TODO: Refactor to LambdaExpression to avoid passing Expression + Parameter everywhere...
 public sealed class Binding < TSource > : IBinding < TSource >
 {
     private readonly CompositeDisposable disposables;
@@ -648,7 +678,7 @@ public sealed class Binding < TSource > : IBinding < TSource >
             Accessor     = ExpressionAccessor.Create < TSource > ( expression );
             Callback     = callback;
             Container    = new CompositeDisposable ( );
-            Subscription = new ExpressionSubscription < TSource > ( services, expression, (o, m) => Callback ( this ) );
+            Subscription = new ExpressionSubscription < TSource > ( services, expression, (e, s, o, m) => Callback ( this ) );
         }
 
         public ExpressionAccessor < TSource >     Accessor     { get; }
