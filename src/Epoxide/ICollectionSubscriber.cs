@@ -148,6 +148,42 @@ public sealed class CollectionChange < T >
     public int  MovedFromIndex  { get; }
 }
 
+public interface ICollectionChangeSet
+{
+    int Count { get; }
+}
+
+public interface ICollectionChangeSet < T > : IListWithRangeSupport < CollectionChange < T > >, ICollectionChangeSet
+{
+
+}
+
+public class CollectionChangeSet < T > : List < CollectionChange < T > >, ICollectionChangeSet < T >
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CollectionChangeSet{T}" /> class
+    /// that is empty and has the default initial capacity.
+    /// </summary>
+    public CollectionChangeSet ( ) { }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CollectionChangeSet{T}" /> class
+    /// that is empty and has the specified initial capacity.
+    /// </summary>
+    /// <param name="capacity">The number of changes that the new set can initially store.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="capacity" /> is less than 0.</exception>
+    public CollectionChangeSet ( int capacity ) : base ( capacity ) { }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CollectionChangeSet{T}" /> class
+    /// that contains changes copied from the specified collection and has sufficient
+    /// capacity to accommodate the number of changes copied.
+    /// </summary>
+    /// <param name="changes">The collection whose changes are copied to the new set.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="changes" /> is <see langword="null" />.</exception>
+    public CollectionChangeSet ( IEnumerable < CollectionChange < T > > changes ) : base ( changes ) { }
+}
+
 public delegate void CollectionChangedCallback < T > ( IEnumerable < T > collection, CollectionChange < T > change );
 
 public abstract class CollectionSubscription < T > : IDisposable
