@@ -32,6 +32,26 @@ public static class BinderExtensions
         return binder.Bind ( null, Expression.Lambda < Func < object?, bool > > ( specifications.Body, CachedExpressionCompiler.UnusedParameter ) );
     }
 
+    public static IBinding Bind ( this IBinder binder, Expression < Func < bool > > specifications, params IDisposable [ ] disposables )
+    {
+        var binding = binder.Bind ( specifications );
+
+        foreach ( var disposable in disposables )
+            binding.Attach ( disposable );
+
+        return binding;
+    }
+
+    public static IBinding Bind < TSource > ( this IBinder binder, Expression < Func < TSource, bool > > specifications, params IDisposable [ ] disposables )
+    {
+        var binding = binder.Bind ( specifications );
+
+        foreach ( var disposable in disposables )
+            binding.Attach ( disposable );
+
+        return binding;
+    }
+
     public static void Invalidate ( this IBinder binder, Expression expression )
     {
         binder.Services.Invalidate ( expression );
