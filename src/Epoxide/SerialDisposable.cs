@@ -61,12 +61,14 @@ public sealed class SerialDisposable : IDisposable
                     if (copy == disposed)
                     {
                         value?.Dispose();
+                        return;
                     }
 
                     var current = Interlocked.CompareExchange(ref _current, value, copy);
                     if (current == copy)
                     {
                         copy?.Dispose();
+                        return;
                     }
 
                     copy = current;
