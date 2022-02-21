@@ -23,6 +23,7 @@ public interface IBindableTask
     object?          RunSelector ( object? result );
 }
 
+// TODO: Add Sentinel support for Selector
 public sealed class BindableTask < T, TResult > : IBindableTask
 {
     public BindableTask ( Task < T > task, Expression selector, Func < T, TResult >? compiledSelector, CancellationToken cancellationToken )

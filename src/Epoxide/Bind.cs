@@ -255,12 +255,12 @@ public abstract class ExpressionAccessor
             CanAdd = ExprHelper.GetGenericInterfaceArguments ( expression.Body.Type, typeof ( ICollection < > ) ) != null;
         }
 
-        // TODO: Convert only if necessary
         private Func < T, object? >? read;
         public  Func < T, object? >  Read => read ??= Compile ( Expression.Body, Expression.Parameters );
 
-        public override bool CanAdd { get; }
-        public override bool CanWrite => false;
+        public override bool       CanAdd       { get; }
+        public override bool       CanWrite     => false;
+        public override MemberInfo TargetMember => throw NotWritable;
 
         public override bool TryRead ( T source, out object? value )
         {
@@ -269,32 +269,36 @@ public abstract class ExpressionAccessor
             return value != Sentinel.Value;
         }
 
-        public override bool TryWrite ( T source, object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
-        {
-            throw new InvalidOperationException ( $"Expression { Expression } is not writable." );
-        }
+        public override bool TryReadTarget ( T      source, [ NotNullWhen ( true ) ] out object? target ) => throw NotWritable;
+        public override void Write         ( object target, object? value )                               => throw NotWritable;
+
+        private InvalidOperationException NotWritable => new InvalidOperationException ( $"Expression { Expression } is not writable." );
     }
 
     protected class Writable < T > : Readable < T >
     {
-        public Writable ( LambdaExpression expression ) : base ( expression ) { }
+        public Writable ( LambdaExpression expression ) : base ( expression )
+        {
+            TargetMember = ( (MemberExpression) Expression.Body ).Member;
+        }
 
-        // TODO: Convert only if necessary
         private Func < T, object? >? readTarget;
         public  Func < T, object? >  ReadTarget => readTarget ??= Compile ( ( (MemberExpression) Expression.Body ).Expression, Expression.Parameters );
 
-        public override bool CanWrite => true;
+        public override bool       CanWrite     => true;
+        public override MemberInfo TargetMember { get; }
 
-        public override bool TryWrite ( T source, object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member )
+        public override bool TryReadTarget ( T source, [ NotNullWhen ( true ) ] out object? target )
         {
-            member = ( (MemberExpression) Expression.Body ).Member;
             target = ReadTarget ( source );
-            if ( target == null || target == Sentinel.Value )
-                return false;
 
-            member.SetValue ( target, value );
+            return target != null && target != Sentinel.Value;
+        }
 
-            return true;
+        // TODO: Emit code to set value
+        public override void Write ( object target, object? value )
+        {
+            TargetMember.SetValue ( target, value );
         }
     }
 }
@@ -308,11 +312,13 @@ public abstract class ExpressionAccessor < TSource >
 
     public LambdaExpression Expression { get; }
 
-    public abstract bool CanAdd   { get; }
-    public abstract bool CanWrite { get; }
+    public abstract bool       CanAdd       { get; }
+    public abstract bool       CanWrite     { get; }
+    public abstract MemberInfo TargetMember { get; }
 
-    public abstract bool TryRead  ( TSource source, out object? value );
-    public abstract bool TryWrite ( TSource source, object? value, [NotNullWhen(true)] out object? target, [NotNullWhen(true)] out MemberInfo? member );
+    public abstract bool TryRead       ( TSource source, out object? value );
+    public abstract bool TryReadTarget ( TSource source, [ NotNullWhen ( true ) ] out object? target );
+    public abstract void Write         ( object  target, object? value );
 
     protected static Func < TSource, object? > Compile ( Expression expression, IReadOnlyCollection < ParameterExpression > parameters )
     {
@@ -466,6 +472,96 @@ public sealed class ExpressionSubscription < TSource > : IDisposable
     public void Dispose ( ) => Unsubscribe ( );
 }
 
+public static class ScheduledExpressionAccessor
+{
+    public static IDisposable ScheduleRead < TSource, TState > ( this IScheduler scheduler, ExpressionAccessor < TSource > accessor, TSource source, TState state, Action < TState, IDisposable?, object? > callback, Action < TState, IDisposable? > failed )
+    {
+        var single = new SerialDisposable ( );
+
+        single.Disposable = scheduler.Schedule ( accessor.Expression, state, state =>
+        {
+            if ( accessor.TryRead ( source, out var value ) )
+            {
+                if ( value is not IBindableTask asyncResult )
+                {
+                    callback ( state, single, value );
+
+                    single.Disposable = null;
+                }
+                else
+                    scheduler.ReadAsync ( asyncResult, source, state, callback, failed, single );
+            }
+            else
+            {
+                failed ( state, single );
+
+                single.Disposable = null;
+            }
+        } );
+
+        return single;
+    }
+
+    public static IDisposable ScheduleReadTarget < TSource, TState > ( this IScheduler scheduler, ExpressionAccessor < TSource > accessor, TSource source, TState state, Action < TState, IDisposable?, object > callback, Action < TState, IDisposable? > failed )
+    {
+        var single = new SerialDisposable ( );
+
+        single.Disposable = scheduler.Schedule ( accessor.Expression, state, state =>
+        {
+            if ( accessor.TryReadTarget ( source, out var target ) )
+            {
+                if ( target is not IBindableTask asyncResult )
+                {
+                    callback ( state, single, target );
+
+                    single.Disposable = null;
+                }
+                else
+                    scheduler.ReadAsync ( asyncResult, source, state, callback, failed, single );
+            }
+            else
+            {
+                failed ( state, single );
+
+                single.Disposable = null;
+            }
+        } );
+
+        return single;
+    }
+
+    private static async void ReadAsync < TSource, TState > ( this IScheduler scheduler, IBindableTask asyncResult, TSource source, TState state, Action < TState, IDisposable?, object? > callback, Action < TState, IDisposable? > failed, SerialDisposable single )
+    {
+        var value = await asyncResult.Run ( );
+
+        if ( asyncResult.Selector is { } selector )
+        {
+            single.Disposable = scheduler.Schedule ( selector, state, state =>
+            {
+                // TODO: Add Sentinel support for Selector
+                value = asyncResult.RunSelector ( value );
+
+                if ( value is not IBindableTask subAsyncResult )
+                {
+                    callback ( state, single, value );
+
+                    single.Disposable = null;
+                }
+                else
+                    scheduler.ReadAsync ( subAsyncResult, source, state, callback, failed, single );
+            } );
+        }
+        else if ( value is not IBindableTask subAsyncResult )
+        {
+            callback ( state, single, value );
+
+            single.Disposable = null;
+        }
+        else
+            scheduler.ReadAsync ( subAsyncResult, source, state, callback, failed, single );
+    }
+}
+
 public sealed class Binding < TSource > : IBinding < TSource >
 {
     private readonly CompositeDisposable disposables;
@@ -493,8 +589,8 @@ public sealed class Binding < TSource > : IBinding < TSource >
         if ( left .Body != leftBody  ) left  = Expression.Lambda ( leftBody,  left .Parameters );
         if ( right.Body != rightBody ) right = Expression.Lambda ( rightBody, right.Parameters );
 
-        leftSide  = new Side ( services, left,  ScheduleReadThenWriteToOtherSide );
-        rightSide = new Side ( services, right, ScheduleReadThenWriteToOtherSide );
+        leftSide  = new Side ( services, left,  ReadThenWriteToOtherSide );
+        rightSide = new Side ( services, right, ReadThenWriteToOtherSide );
 
         leftSide .OtherSide = rightSide;
         rightSide.OtherSide = leftSide;
@@ -505,15 +601,15 @@ public sealed class Binding < TSource > : IBinding < TSource >
         {
             initialSide = leftSide;
 
-            leftSide .Callback = ScheduleReadThenAddFromOtherSide;
-            rightSide.Callback = ScheduleOtherSideReadThenAddFromThisSide;
+            leftSide .Callback = ReadCollectionThenBindToOtherSide;
+            rightSide.Callback = ReadOtherSideCollectionThenBind;
         }
         else if ( Right.CanAdd )
         {
             initialSide = rightSide;
 
-            leftSide .Callback = ScheduleOtherSideReadThenAddFromThisSide;
-            rightSide.Callback = ScheduleReadThenAddFromOtherSide;
+            leftSide .Callback = ReadOtherSideCollectionThenBind;
+            rightSide.Callback = ReadCollectionThenBindToOtherSide;
         }
         else
         {
@@ -548,7 +644,9 @@ public sealed class Binding < TSource > : IBinding < TSource >
     public void Unbind ( )
     {
         leftSide .Subscription.Unsubscribe ( );
+        leftSide .Container   .Clear       ( );
         rightSide.Subscription.Unsubscribe ( );
+        rightSide.Container   .Clear       ( );
     }
 
     private CompositeDisposable? activeContainer;
@@ -557,130 +655,85 @@ public sealed class Binding < TSource > : IBinding < TSource >
     public bool Detach  ( IDisposable disposable ) => leftSide.Container.Remove ( disposable ) || rightSide.Container.Remove ( disposable ) || disposables.Remove ( disposable );
     public void Dispose ( )                        => disposables.Dispose ( );
 
-    private void ScheduleReadThenWriteToOtherSide         ( Side side ) => Schedule ( side.Accessor.Expression, side, ReadThenWriteToOtherSide );
-    private void ScheduleReadThenAddFromOtherSide         ( Side side ) => Schedule ( side.Accessor.Expression, side, ReadThenReadThenAddFromOtherSide );
-    private void ScheduleOtherSideReadThenAddFromThisSide ( Side side ) => Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, ReadThenReadThenAddFromOtherSide );
-
     private void ReadThenWriteToOtherSide ( Side side )
     {
-        if ( ! TryRead ( side ) )
+        BeforeRead   ( side );
+        ScheduleRead ( side, Services.Scheduler.ScheduleRead ( side.Accessor, Source, side.OtherSide, WriteToOtherSide, UnscheduleRead ) );
+    }
+
+    private void WriteToOtherSide ( Side otherSide, IDisposable? disposable, object? value )
+    {
+        AfterRead ( otherSide.OtherSide, disposable );
+
+        BeforeRead   ( otherSide );
+        ScheduleRead ( otherSide, Services.Scheduler.ScheduleReadTarget ( otherSide.Accessor, Source, otherSide, WriteValueToTarget, UnscheduleRead ) );
+
+        void WriteValueToTarget ( Side otherSide, IDisposable? disposable, object target )
+        {
+            AfterRead ( otherSide, disposable );
+
+            otherSide.Accessor.Write ( target, value );
+            if ( ! Equals ( Value, Value = value ) )
+                Services.MemberSubscriber.Invalidate ( otherSide.Accessor.Expression, otherSide.Accessor.TargetMember );
+        }
+    }
+
+    private void ReadCollectionThenBindToOtherSide ( Side side )
+    {
+        BeforeRead   ( side );
+        ScheduleRead ( side, Services.Scheduler.ScheduleRead ( side.Accessor, Source, side.OtherSide, BindCollectionToOtherSide, UnscheduleRead ) );
+    }
+
+    private void ReadOtherSideCollectionThenBind ( Side side )
+    {
+        ReadCollectionThenBindToOtherSide ( side.OtherSide );
+    }
+
+    private void BindCollectionToOtherSide ( Side otherSide, IDisposable? disposable, object? collection )
+    {
+        AfterRead ( otherSide.OtherSide, disposable );
+
+        if ( collection == null )
             return;
 
-        if ( ! TryReadAsync ( side, side => Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, WriteFromOtherSide ) ) )
-            Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, WriteFromOtherSide );
+        BeforeRead   ( otherSide );
+        ScheduleRead ( otherSide, Services.Scheduler.ScheduleRead ( otherSide.Accessor, Source, otherSide, BindCollection, UnscheduleRead ) );
+
+        void BindCollection ( Side otherSide, IDisposable? disposable, object enumerable )
+        {
+            AfterRead ( otherSide, disposable );
+
+            if ( Services.CollectionSubscriber.BindCollections ( Value = collection, enumerable ) is { } binding )
+                otherSide.Container.Add ( binding );
+        }
     }
 
-    private void WriteFromOtherSide ( Side side )
-    {
-        if ( side.Accessor.TryWrite ( Source, side.OtherSide.Value, out var target, out var member ) )
-            if ( ! Equals ( Value, Value = side.OtherSide.Value ) )
-                Services.MemberSubscriber.Invalidate ( side.Accessor.Expression, member );
-
-        side.Subscription.Subscribe ( Source );
-    }
-
-    private void ReadThenReadThenAddFromOtherSide ( Side side )
-    {
-        if ( ! TryRead ( side ) || side.Value == null )
-            return;
-
-        if ( ! TryReadAsync ( side, ScheduleReadThenAddToOtherSide ) )
-            ScheduleReadThenAddToOtherSide ( side );
-    }
-
-    private void ScheduleReadThenAddToOtherSide ( Side side )
-    {
-        if ( side.Value != null )
-            Schedule ( side.OtherSide.Accessor.Expression, side.OtherSide, ReadThenAddToOtherSide );
-    }
-
-    private void ReadThenAddToOtherSide ( Side side )
-    {
-        if ( ! TryRead ( side ) )
-            return;
-
-        if ( ! TryReadAsync ( side, AddToOtherSide ) )
-            AddToOtherSide ( side );
-    }
-
-    private void AddToOtherSide ( Side side )
-    {
-        if ( side.OtherSide.Value is { } collection && Services.CollectionSubscriber.BindCollections ( Value = collection, side.Value ) is { } binding )
-            side.Container.Add ( binding );
-    }
-
-    private bool TryRead ( Side side )
+    private void BeforeRead ( Side side )
     {
         side.Container.Clear ( );
 
         activeContainer = side.Container;
+    }
 
-        var read = side.Accessor.TryRead ( Source, out var value );
+    private void ScheduleRead ( Side side, IDisposable? scheduled )
+    {
+        if ( scheduled != null )
+            side.Container.Add ( scheduled );
+    }
 
-        side.Value = read ? value : null;
+    private void AfterRead ( Side side, IDisposable? scheduled )
+    {
+        side.Subscription.Subscribe ( Source );
 
-        if ( value is not IBindableTask )
-            side.Subscription.Subscribe ( Source );
+        UnscheduleRead ( side, scheduled );
+    }
+
+    private void UnscheduleRead ( Side side, IDisposable? scheduled )
+    {
+        if ( scheduled != null )
+            side.Container.Remove ( scheduled );
 
         activeContainer = null;
-
-        return read;
-    }
-
-    private bool TryReadAsync ( Side side, Action < Side > callback )
-    {
-        if ( side.Value is IBindableTask asyncResult )
-        {
-            ReadAsync ( side, asyncResult, callback );
-            return true;
-        }
-
-        return false;
-    }
-
-    private async void ReadAsync ( Side side, IBindableTask asyncResult, Action < Side > callback )
-    {
-        var value = await asyncResult.Run ( );
-
-        if ( asyncResult.Selector is { } selector )
-        {
-            Schedule ( selector, (object?) null, _ =>
-            {
-                side.Value = asyncResult.RunSelector ( value );
-
-                if ( side.Value is IBindableTask subAsyncResult )
-                    ReadAsync ( side, subAsyncResult, callback );
-                else
-                    callback ( side );
-            } );
-        }
-        else
-        {
-            side.Value = value;
-
-            if ( side.Value is IBindableTask subAsyncResult )
-                ReadAsync ( side, subAsyncResult, callback );
-            else
-                callback ( side );
-        }
-    }
-
-    private void Schedule < TState > ( Expression expression, TState state, Action < TState > action )
-    {
-        var scheduled = (IDisposable?) null;
-
-        scheduled = Services.Scheduler.Schedule ( expression, state, InvokeAndUnschedule );
-
-        if ( scheduled != null )
-            disposables.Add ( scheduled );
-
-        void InvokeAndUnschedule ( TState state )
-        {
-            action ( state );
-
-            if ( scheduled != null )
-                disposables.Remove ( scheduled );
-        }
     }
 
     private class Side
@@ -698,7 +751,6 @@ public sealed class Binding < TSource > : IBinding < TSource >
         public CompositeDisposable                Container    { get; }
         public ExpressionSubscription < TSource > Subscription { get; }
         public Side                               OtherSide    { get; set; }
-        public object?                            Value        { get; set; }
     }
 }
 
