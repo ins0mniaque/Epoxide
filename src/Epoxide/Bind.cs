@@ -101,7 +101,9 @@ public class Binder : IBinder
                 var eventName     = m.Arguments.Count == 3 ? (string) ( (ConstantExpression) m.Arguments [ 1 ] ).Value : b.EventName;
                 var eventSource   = Expression.Lambda ( m.Arguments [ 0 ], lambda.Parameters );
                 var eventLambda   = (LambdaExpression) m.Arguments [ ^1 ];
-                var eventArgsType = eventLambda.Parameters.Count > 0 ? eventLambda.Parameters [ 0 ].Type : typeof ( object );
+                var eventInfo     = eventSource.Body.Type.GetEvent ( eventName ) ??
+                                    throw new InvalidOperationException ( $"Event { eventName } not found on type { eventSource.Body.Type.FullName }" );
+                var eventArgsType = eventInfo.EventHandlerType.GetMethod ( nameof ( Action.Invoke ) ).GetParameters ( ).Last ( ).ParameterType;
 
                 if ( eventLambda.Parameters.Count == 0 )
                     eventLambda = Expression.Lambda ( eventLambda.Body, Expression.Parameter ( eventArgsType, "e" ) );
@@ -112,9 +114,9 @@ public class Binder : IBinder
                 var eventBindingType = typeof ( EventBinding < , > ).MakeGenericType ( typeof ( TSource ), eventArgsType );
 
                 // TODO: Create static method to cache reflection
-                var eventBindingCtor = eventBindingType.GetConstructor ( new [ ] { typeof ( IBinderServices ), typeof ( LambdaExpression ), typeof ( string ), typeof ( IBinding < > ).MakeGenericType ( eventArgsType ) } );
+                var eventBindingCtor = eventBindingType.GetConstructor ( new [ ] { typeof ( IBinderServices ), typeof ( LambdaExpression ), typeof ( EventInfo ), typeof ( IBinding < > ).MakeGenericType ( eventArgsType ) } );
 
-                return (IBinding < TSource >) eventBindingCtor.Invoke ( new object [ ] { Services, eventSource, eventName, eventBinding } );
+                return (IBinding < TSource >) eventBindingCtor.Invoke ( new object [ ] { Services, eventSource, eventInfo, eventBinding } );
             }
         }
 
@@ -595,16 +597,16 @@ public sealed class Binding < TSource > : IBinding < TSource >
         leftSide .OtherSide = rightSide;
         rightSide.OtherSide = leftSide;
 
-        if      ( Left .CanWrite ) initialSide = rightSide;
-        else if ( Right.CanWrite ) initialSide = leftSide;
-        else if ( Left.CanAdd && ( Left.Expression.Body.NodeType == ExpressionType.MemberAccess || ! Right.CanAdd ) )
+        if      ( leftSide .Accessor.CanWrite ) initialSide = rightSide;
+        else if ( rightSide.Accessor.CanWrite ) initialSide = leftSide;
+        else if ( leftSide .Accessor.CanAdd && ( leftSide.Accessor.Expression.Body.NodeType == ExpressionType.MemberAccess || ! rightSide.Accessor.CanAdd ) )
         {
             initialSide = leftSide;
 
             leftSide .Callback = ReadCollectionThenBindToOtherSide;
             rightSide.Callback = ReadOtherSideCollectionThenBind;
         }
-        else if ( Right.CanAdd )
+        else if ( rightSide.Accessor.CanAdd )
         {
             initialSide = rightSide;
 
@@ -631,10 +633,8 @@ public sealed class Binding < TSource > : IBinding < TSource >
     public IBinderServices Services { get; }
 
     // TODO: Invalidate on source change
-    public TSource                        Source { get; set; }
-    public ExpressionAccessor < TSource > Left   => leftSide .Accessor;
-    public ExpressionAccessor < TSource > Right  => rightSide.Accessor;
-    public object?                        Value  { get; private set; }
+    public TSource Source { get; set; }
+    public object? Value  { get; private set; }
 
     public void Bind ( )
     {
@@ -658,12 +658,14 @@ public sealed class Binding < TSource > : IBinding < TSource >
     private void ReadThenWriteToOtherSide ( Side side )
     {
         BeforeRead   ( side );
-        ScheduleRead ( side, Services.Scheduler.ScheduleRead ( side.Accessor, Source, side.OtherSide, WriteToOtherSide, UnscheduleRead ) );
+        ScheduleRead ( side, Services.Scheduler.ScheduleRead ( side.Accessor, Source, side, WriteToOtherSide, UnscheduleRead ) );
     }
 
-    private void WriteToOtherSide ( Side otherSide, IDisposable? disposable, object? value )
+    private void WriteToOtherSide ( Side side, IDisposable? disposable, object? value )
     {
-        AfterRead ( otherSide.OtherSide, disposable );
+        AfterRead ( side, disposable );
+
+        var otherSide = side.OtherSide;
 
         BeforeRead   ( otherSide );
         ScheduleRead ( otherSide, Services.Scheduler.ScheduleReadTarget ( otherSide.Accessor, Source, otherSide, WriteValueToTarget, UnscheduleRead ) );
@@ -681,7 +683,7 @@ public sealed class Binding < TSource > : IBinding < TSource >
     private void ReadCollectionThenBindToOtherSide ( Side side )
     {
         BeforeRead   ( side );
-        ScheduleRead ( side, Services.Scheduler.ScheduleRead ( side.Accessor, Source, side.OtherSide, BindCollectionToOtherSide, UnscheduleRead ) );
+        ScheduleRead ( side, Services.Scheduler.ScheduleRead ( side.Accessor, Source, side, BindCollectionToOtherSide, UnscheduleRead ) );
     }
 
     private void ReadOtherSideCollectionThenBind ( Side side )
@@ -689,12 +691,14 @@ public sealed class Binding < TSource > : IBinding < TSource >
         ReadCollectionThenBindToOtherSide ( side.OtherSide );
     }
 
-    private void BindCollectionToOtherSide ( Side otherSide, IDisposable? disposable, object? collection )
+    private void BindCollectionToOtherSide ( Side side, IDisposable? disposable, object? collection )
     {
-        AfterRead ( otherSide.OtherSide, disposable );
+        AfterRead ( side, disposable );
 
         if ( collection == null )
             return;
+
+        var otherSide = side.OtherSide;
 
         BeforeRead   ( otherSide );
         ScheduleRead ( otherSide, Services.Scheduler.ScheduleRead ( otherSide.Accessor, Source, otherSide, BindCollection, UnscheduleRead ) );
@@ -757,30 +761,149 @@ public sealed class Binding < TSource > : IBinding < TSource >
 public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >
 {
     readonly CompositeDisposable disposables;
-    readonly IBinding            binding;
 
-    public EventBinding ( IBinderServices services, LambdaExpression source, string eventName, IBinding < TArgs > binding )
+    private readonly Side eventSourceSide;
+
+    public EventBinding ( IBinderServices services, LambdaExpression eventSource, EventInfo eventInfo, IBinding < TArgs > subscribedBinding )
     {
-        disposables = new CompositeDisposable ( 1 );
+        disposables = new CompositeDisposable ( 3 );
 
-        Services = services;
+        Services          = services;
+        Event             = eventInfo;
+        SubscribedBinding = subscribedBinding;
 
-        disposables.Add ( this.binding = binding );
+        var binding = Expression.Constant ( this );
 
-        // TODO: Read source, hook event
+        var eventSourceBody = new EnumerableToBindableEnumerableVisitor ( binding ).Visit ( eventSource.Body );
+            eventSourceBody = new AggregateInvalidatorVisitor           ( )        .Visit ( eventSourceBody );
+
+        if ( eventSource.Body != eventSourceBody )
+            eventSource = Expression.Lambda ( eventSourceBody, eventSource.Parameters );
+
+        eventSourceSide = new Side ( services, eventSource, ReadThenSubscribeToEvent );
+
+        disposables.Add ( eventSourceSide.Container    );
+        disposables.Add ( eventSourceSide.Subscription );
+        disposables.Add ( subscribedBinding );
     }
 
-    public IBinderServices Services { get; }
+    public IBinderServices    Services          { get; }
+    public EventInfo          Event             { get; }
+    public IBinding < TArgs > SubscribedBinding { get; }
 
     // TODO: Invalidate on source change
     public TSource Source { get; set; }
 
-    public void Bind   ( ) => binding.Bind   ( );
-    public void Unbind ( ) => binding.Unbind ( );
+    public void Bind ( )
+    {
+        ReadThenSubscribeToEvent ( eventSourceSide );
+    }
 
-    public void Attach  ( IDisposable disposable ) => disposables.Add     ( disposable );
-    public bool Detach  ( IDisposable disposable ) => disposables.Remove  ( disposable );
+    public void Unbind ( )
+    {
+        SubscribedBinding.Unbind ( );
+
+        eventSourceSide.Subscription.Unsubscribe ( );
+        eventSourceSide.Container   .Clear       ( );
+    }
+
+    private CompositeDisposable? activeContainer;
+
+    public void Attach  ( IDisposable disposable ) => ( activeContainer ?? disposables ).Add ( disposable );
+    public bool Detach  ( IDisposable disposable ) => eventSourceSide.Container.Remove ( disposable ) || disposables.Remove ( disposable );
     public void Dispose ( )                        => disposables.Dispose ( );
+
+    private void ReadThenSubscribeToEvent ( Side side )
+    {
+        BeforeRead   ( side );
+        ScheduleRead ( side, Services.Scheduler.ScheduleRead ( side.Accessor, Source, side, SubscribeToEvent, UnscheduleRead ) );
+    }
+
+    private void SubscribeToEvent ( Side side, IDisposable? disposable, object? eventSource )
+    {
+        AfterRead ( side, disposable );
+
+        if ( eventSource == null )
+            return;
+
+        Event.AddEventHandler ( eventSource, EventHandler );
+
+        side.Container.Add ( new Token ( Event, eventSource, EventHandler ) );
+    }
+
+    private Delegate? eventHandler;
+    private Delegate  EventHandler => eventHandler ??= Delegate.CreateDelegate ( Event.EventHandlerType, this, nameof ( HandleEvent ) );
+
+    // TODO: Add support for any events using code from GenericEventMemberSubscription
+    private void HandleEvent ( object sender, TArgs args )
+    {
+        SubscribedBinding.Unbind ( );
+        SubscribedBinding.Source = args;
+        SubscribedBinding.Bind ( );
+    }
+
+    private void BeforeRead ( Side side )
+    {
+        side.Container.Clear ( );
+
+        activeContainer = side.Container;
+    }
+
+    private void ScheduleRead ( Side side, IDisposable? scheduled )
+    {
+        if ( scheduled != null )
+            side.Container.Add ( scheduled );
+    }
+
+    private void AfterRead ( Side side, IDisposable? scheduled )
+    {
+        side.Subscription.Subscribe ( Source );
+
+        UnscheduleRead ( side, scheduled );
+    }
+
+    private void UnscheduleRead ( Side side, IDisposable? scheduled )
+    {
+        if ( scheduled != null )
+            side.Container.Remove ( scheduled );
+
+        activeContainer = null;
+    }
+
+    private class Side
+    {
+        public Side ( IBinderServices services, LambdaExpression expression, Action < Side > callback )
+        {
+            Accessor     = ExpressionAccessor.Create < TSource > ( expression );
+            Callback     = callback;
+            Container    = new CompositeDisposable ( );
+            Subscription = new ExpressionSubscription < TSource > ( services, expression, (e, s, o, m) => Callback ( this ) );
+        }
+
+        public ExpressionAccessor < TSource >     Accessor     { get; }
+        public Action < Side >                    Callback     { get; set; }
+        public CompositeDisposable                Container    { get; }
+        public ExpressionSubscription < TSource > Subscription { get; }
+    }
+
+    private sealed class Token : IDisposable
+    {
+        public Token ( EventInfo eventInfo, object eventSource, Delegate eventHandler )
+        {
+            Event        = eventInfo;
+            EventSource  = eventSource;
+            EventHandler = eventHandler;
+        }
+
+        public EventInfo Event        { get; }
+        public object    EventSource  { get; }
+        public Delegate  EventHandler { get; }
+
+        public void Dispose ( )
+        {
+            Event.RemoveEventHandler ( EventSource, EventHandler );
+        }
+    }
 }
 
 public sealed class ContainerBinding : IBinding
