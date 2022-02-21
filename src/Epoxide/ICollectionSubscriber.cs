@@ -36,9 +36,28 @@ public enum CollectionOperation
     Invalidate
 }
 
+public static class CollectionChange
+{
+    public static IEnumerable < CollectionChange < TResult > > ChangeType < T, TResult > ( this IEnumerable < CollectionChange < T > > changes, Func < T, TResult > selector )
+    {
+        return changes.Select ( change => CollectionChange < T >.ChangeType ( change, selector ) );
+    }
+
+    public static void ReplicateChanges < T > ( this ICollection < T > collection, IEnumerable < CollectionChange < T > > changes, IEnumerable < T > source )
+    {
+        // TODO: Process changes
+        if ( changes.Any ( ) )
+        {
+            collection.Clear ( );
+            foreach ( var item in source )
+                collection.Add ( item );
+        }
+    }
+}
+
 public sealed class CollectionChange < T >
 {
-    // TODO: Move methods to non-generic static class
+    // TODO: Move methods to CollectionChange static class
     public static CollectionChange < T > Added ( T current, int index = -1 )
     {
         return new ( CollectionOperation.Add, item: current, index: index );
@@ -93,6 +112,17 @@ public sealed class CollectionChange < T >
     public static CollectionChange < T > Invalidated ( )
     {
         return new ( CollectionOperation.Invalidate );
+    }
+
+    public static CollectionChange < TResult > ChangeType < TResult > ( CollectionChange < T > change, Func < T, TResult > selector )
+    {
+        return new ( change.Operation,
+                     change.Items?.Select ( selector ).ToList ( ),
+                     selector ( change.Item ),
+                     change.Index,
+                     change.HasReplacedItem,
+                     change.HasReplacedItem ? selector ( change.ReplacedItem ) : default,
+                     change.MovedFromIndex );
     }
 
     private CollectionChange ( CollectionOperation operation, IReadOnlyList < T >? items = null, T? item = default, int index = -1, bool hasReplacedItem = false, T? replacedItem = default, int movedFromIndex = -1 )

@@ -182,18 +182,8 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 		if ( _chain.Count == 0 && typeof ( T ) != typeof ( TElement ) )
 			throw new ArgumentException ( $"Collection element type should be { TypeHelper.FindGenericType ( typeof ( IEnumerable < > ), typeof ( T ) )?.Name }", nameof ( collection ) );
 
-		applyChanges = c =>
-        {
-			var changes = c.Cast < CollectionChange < TElement > > ( ).ToList ( );
-
-			// TODO: Add change processor
-			if ( changes.Any ( ) )
-			{
-				collection.Clear ( );
-				foreach ( var item in (IEnumerable<TElement>) _chain [ ^1 ] )
-					collection.Add ( item );
-			}
-        };
+		applyChanges = changes => collection.ReplicateChanges ( changes.Cast < CollectionChange < TElement > > ( ),
+																(IEnumerable < TElement >) _chain [ ^1 ] );
 
 		if ( subscription != null )
 			Binding.Detach ( subscription );
@@ -242,24 +232,24 @@ public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumer
 		Parent = parent;
     }
 
-	public override IBinding Binding => Parent.Binding;
+	public override sealed IBinding Binding => Parent.Binding;
 
-	public override IEnumerable Source => Parent.Source;
+	public override sealed IEnumerable Source => Parent.Source;
 
-	public override BindableEnumerableOptions Options => Parent.Options;
+	public override sealed BindableEnumerableOptions Options => Parent.Options;
 
-    public override void SetTarget < TElement > ( ICollection < TElement > collection ) => Parent.SetTarget ( collection );
-    public override void SetTarget              ( Expression			   expression ) => Parent.SetTarget ( expression );
+    public override sealed void SetTarget < TElement > ( ICollection < TElement > collection ) => Parent.SetTarget ( collection );
+    public override sealed void SetTarget              ( Expression			   expression ) => Parent.SetTarget ( expression );
 
     protected IBindableEnumerable < TSource > Parent { get; }
 
-    public override void NotifyExecuted ( IBindableEnumerable enumerable )
+    public override sealed void NotifyExecuted ( IBindableEnumerable enumerable )
 	{
 		Parent.NotifyExecuted ( enumerable );
 		base  .NotifyExecuted ( enumerable );
 	}
 
-    public override IEnumerable ProcessChanges ( IEnumerable changes )
+    public override sealed IEnumerable ProcessChanges ( IEnumerable changes )
     {
 		return ProcessChanges ( (IEnumerable<CollectionChange<TSource>>) changes );
     }
@@ -269,7 +259,7 @@ public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumer
 		yield return CollectionChange<TResult>.Invalidated ( );
     }
 
-    public override void ReportChanges ( IBindableEnumerable enumerable, IEnumerable changes )
+    public override sealed void ReportChanges ( IBindableEnumerable enumerable, IEnumerable changes )
     {
 		Parent.ReportChanges ( enumerable, changes );
     }
@@ -304,6 +294,8 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 	private Func<T, bool>? _compiledPredicate;
 	private ExpressionSubscriber<T> _subscriber;
 	private CompositeDisposable? _disposables;
+	private List<T>? _items;
+	private List<bool>? _visibility;
 
     protected override IEnumerator < T > GetEnumerator ( )
     {
@@ -313,23 +305,67 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 		if ( _disposables == null )
 			Binding.Attach ( _disposables = new CompositeDisposable ( ) );
 
-		var list = new List < T > ( Parent );
-		if ( list.Count == 0 )
-			return list.GetEnumerator ( );
+		// TODO: Scheduling
+		_items      = new List < T > ( Parent );
+		_visibility = _items.Select ( _compiledPredicate ).ToList ( );
+
+		var count = _items.Count;
+		if ( count == 0 )
+			return _items.GetEnumerator ( );
 
 		_disposables.Clear ( );
-		foreach ( var item in list )
-			_disposables.Add ( _subscriber.Subscribe ( item, Callback ) );
+		for ( var index = 0; index < count; index++ )
+		{
+			var i = index;
+			_disposables.Add ( _subscriber.Subscribe ( _items [ i ], (e, s, t, m) => Callback ( e, s, i, t, m ) ) );
+		}
 
-		return list.Where ( _compiledPredicate ).GetEnumerator ( );
+		return _items.Where ( (_, i) => _visibility [ i ] ).GetEnumerator ( );
 
-		// TODO: Generate CollectionChange
-		// TODO: Scheduling
-		void Callback ( LambdaExpression expression, T source, object target, MemberInfo member )
+		void Callback ( LambdaExpression expression, T source, int index, object target, MemberInfo member )
         {
-			ReportChanges ( this, Enumerable.Repeat ( CollectionChange < T >.Invalidated ( ), 1 ) );
+			var wasVisible = _visibility [ index ];
+			var isVisible  = _compiledPredicate ( source );
+
+			if ( wasVisible == isVisible )
+				return;
+
+			_visibility [ index ] = isVisible;
+
+			var changeIndex = 0;
+			for ( var i = 0; i < index; i++ )
+				if ( _visibility [ i ] )
+					changeIndex++;
+
+			if ( ! wasVisible && isVisible )
+				ReportChanges ( this, Enumerable.Repeat ( CollectionChange < T >.Added ( source, changeIndex ), 1 ) );
+			else if ( wasVisible && ! isVisible )
+				ReportChanges ( this, Enumerable.Repeat ( CollectionChange < T >.Removed ( source, changeIndex ), 1 ) );
         }
     }
+
+	// TODO: Add CollectionChangeSet
+    public override IEnumerable < CollectionChange < T > > ProcessChanges ( IEnumerable < CollectionChange < T > > changes )
+	{
+		var visibilityChanges = changes.ChangeType ( _compiledPredicate ).ToList ( );
+
+		// TODO: Enumerable wrapper to enumerate Parent only once
+		_items     .ReplicateChanges ( changes,			  Parent );
+		_visibility.ReplicateChanges ( visibilityChanges, Parent.Select ( _compiledPredicate ) );
+
+		// TODO: Process all changes and return them only if all successfully processed
+		foreach ( var visibilityChange in visibilityChanges )
+        {
+			// TODO: Add         => True: Keep, False: Skip
+			// TODO: AddRange    => All True: Keep, All False: Skip, Else: Recurse
+			// TODO: Remove      => True: Keep, False: Skip
+			// TODO: RemoveRange => All True: Keep, All False: Skip, Else: Recurse
+			// TODO: Move        => True: Keep, False: Skip
+			// TODO: Replace     => If HasReplacedItem, use it, otherwise, old visibility by index
+        }
+
+		return base.ProcessChanges ( changes );
+	}
 }
 
 /// <summary>Provides a set of <see langword="static" /> (<see langword="Shared" /> in Visual Basic) methods for querying objects that implement <see cref="IBindableEnumerable`1" />.</summary>

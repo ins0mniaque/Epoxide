@@ -978,20 +978,15 @@ public static class CollectionBinder
 
     public static IDisposable? BindCollections < T > ( this ICollectionSubscriber subscriber, ICollection < T > collection, IEnumerable < T >? enumerable )
     {
-        collection.Clear ( );
         if ( enumerable == null )
-            return null;
-
-        foreach ( var item in enumerable )
-            collection.Add ( item );
-
-        return subscriber.Subscribe ( enumerable, (o, e) =>
         {
-            // TODO: Process changes
             collection.Clear ( );
-            if ( enumerable != null )
-                foreach ( var item in enumerable )
-                    collection.Add ( item );
-        } );
+
+            return null;
+        }
+
+        collection.ReplicateChanges ( Enumerable.Repeat ( CollectionChange < T >.Invalidated ( ), 1 ), enumerable );
+
+        return subscriber.Subscribe ( enumerable, (o, e) => collection.ReplicateChanges ( Enumerable.Repeat ( e, 1 ), enumerable ) );
     }
 }
