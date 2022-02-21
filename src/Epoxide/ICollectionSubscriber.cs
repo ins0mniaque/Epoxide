@@ -141,11 +141,27 @@ public sealed class CollectionChange < T >
     public IReadOnlyList < T >? Items { get; }
 
     public T?  Item  { get; }
-    public int Index { get; }
+    public int Index { get; private set; }
 
     public bool HasReplacedItem { get; }
     public T?   ReplacedItem    { get; }
-    public int  MovedFromIndex  { get; }
+    public int  MovedFromIndex  { get; private set; }
+
+    public void ChangeIndex ( int index )
+    {
+        if ( index < 0 ) throw new ArgumentOutOfRangeException ( nameof ( index ) );
+        if ( Index < 0 ) throw new InvalidOperationException   ( "CollectionChange has no Index to change" );
+
+        Index = index;
+    }
+
+    public void ChangeMovedFromIndex ( int movedFromIndex )
+    {
+        if ( movedFromIndex < 0 ) throw new ArgumentOutOfRangeException ( nameof ( movedFromIndex ) );
+        if ( MovedFromIndex < 0 ) throw new InvalidOperationException   ( "CollectionChange has no MovedFromIndex to change" );
+
+        MovedFromIndex = movedFromIndex;
+    }
 }
 
 public interface ICollectionChangeSet

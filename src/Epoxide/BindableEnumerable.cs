@@ -332,10 +332,7 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 
 			_visibility [ index ] = isVisible;
 
-			var changeIndex = 0;
-			for ( var i = 0; i < index; i++ )
-				if ( _visibility [ i ] )
-					changeIndex++;
+			var changeIndex = _visibility.Take ( index ).Count ( v => v );
 
 			if ( ! wasVisible && isVisible )
 				ReportChanges ( this, new CollectionChangeSet < T > ( 1 ) { CollectionChange < T >.Added ( source, changeIndex ) } );
@@ -352,20 +349,37 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 		_items     .ReplicateChanges ( changes,			  Parent );
 		_visibility.ReplicateChanges ( visibilityChanges, Parent.Select ( _compiledPredicate ) );
 
-		// TODO: Process all changes and return them only if all successfully processed
-		foreach ( var visibilityChange in visibilityChanges )
+		for ( var index = visibilityChanges.Count - 1; index >= 0; index-- )
         {
-			// TODO: Add         => True: Keep, False: Skip
-			// TODO: AddRange    => All True: Keep, All False: Skip, Else: Recurse
-			// TODO: Remove      => True: Keep, False: Skip
-			// TODO: RemoveRange => All True: Keep, All False: Skip, Else: Recurse
-			// TODO: Move        => True: Keep, False: Skip
-			// TODO: Replace     => If HasReplacedItem, use it, otherwise, old visibility by index
+			var change = changes[index];
+			var visibilityChange = visibilityChanges[index];
+
+			var skip = change.Operation switch
+			{
+				CollectionOperation.Add or CollectionOperation.Remove or CollectionOperation.Move => !visibilityChange.Item,
+				CollectionOperation.AddRange or CollectionOperation.RemoveRange => visibilityChange.Items.All(v => !v),
+				CollectionOperation.Replace => ! ( visibilityChange.Index >= 0 && _visibility[visibilityChange.Index] ||
+												   visibilityChange.HasReplacedItem && visibilityChange.ReplacedItem ) &&
+												   !visibilityChange.Item,
+				_ => false
+            };
+
+			if ( ! skip )
+            {
+				if ( change.Index >= 0 )
+					change.ChangeIndex ( _visibility.Take ( change.Index ).Count ( v => v ) );
+
+				if ( change.MovedFromIndex >= 0 )
+					change.ChangeMovedFromIndex ( _visibility.Take ( change.MovedFromIndex ).Count ( v => v ) );
+            }
+			else
+				changes.RemoveAt ( index );
         }
 
-		return base.ProcessChanges ( changes );
+		return changes;
 	}
 }
+
 
 /// <summary>Provides a set of <see langword="static" /> (<see langword="Shared" /> in Visual Basic) methods for querying objects that implement <see cref="IBindableEnumerable`1" />.</summary>
 public static class BindableEnumerable
