@@ -1,5 +1,4 @@
 ﻿using System.Collections;
-using System.Collections.Specialized;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -14,15 +13,13 @@ public sealed class BindableEnumerableOptions
 
 public interface IBindableEnumerable : IEnumerable
 {
-	event EventHandler < EventArgs >? Executed;
-
 	IBinding    Binding { get; }
 	IEnumerable Source  { get; }
 
-	BindableEnumerableOptions Options { get; } 
-
 	// NOTE: Hide inside internal interface?
-	void NotifyExecuted ( IBindableEnumerable enumerable );
+	IBindableEnumerable? Next { get; }
+
+	BindableEnumerableOptions Options { get; } 
 
 	// NOTE: Hide inside internal interface?
 	ICollectionChangeSet ProcessChanges ( ICollectionChangeSet changes );
@@ -34,7 +31,8 @@ public interface IBindableEnumerable : IEnumerable
 
 public interface IBindableEnumerable < T > : IBindableEnumerable, IEnumerable < T >
 {
-	
+	// NOTE: Hide inside internal interface?
+	void Chain ( IBindableEnumerable enumerable );
 }
 
 // TODO: Rename
@@ -49,21 +47,59 @@ public interface IBindableOrderedEnumerable < T > : IBindableEnumerable < T >, I
 
 }
 
-public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < T >
+// TODO: Rename
+public abstract class EnumerableBase < T > : IEnumerable < T >
 {
-    public event EventHandler < EventArgs >? Executed;
+	protected abstract IEnumerator < T > GetEnumerator ( );
+	protected abstract void				 Enumerated    ( );
 
+    IEnumerator	      IEnumerable      .GetEnumerator ( ) => new Enumerator ( this );
+    IEnumerator < T > IEnumerable < T >.GetEnumerator ( ) => new Enumerator ( this );
+
+	private class Enumerator : IEnumerator < T >
+    {
+		private readonly EnumerableBase < T > enumerable;
+		private readonly IEnumerator    < T > enumerator;
+
+		public Enumerator ( EnumerableBase < T > enumerable )
+        {
+			this.enumerable = enumerable;
+			this.enumerator = enumerable.GetEnumerator ( );
+        }
+
+        public T		   Current => enumerator.Current;
+        object IEnumerator.Current => ( (IEnumerator) enumerator ).Current;
+
+        public bool MoveNext ( ) => enumerator.MoveNext ( );
+        public void Reset    ( ) => enumerator.Reset    ( );
+
+		public void Dispose ( )
+		{
+			enumerator.Dispose    ( );
+			enumerable.Enumerated ( );
+		}
+    }
+}
+
+// TODO: Rename
+public abstract class BindableEnumerableBase < T > : EnumerableBase < T >, IBindableOrderedEnumerable < T >
+{
     public abstract IBinding    Binding { get; }
     public abstract IEnumerable Source  { get; }
 
 	public abstract BindableEnumerableOptions Options { get; }
 
+	public IBindableEnumerable? Next { get; private set; }
+
 	public abstract void SetTarget < TElement > ( ICollection < TElement > collection );
 	public abstract void SetTarget				( Expression			   expression );
 
-	public virtual void NotifyExecuted ( IBindableEnumerable enumerable )
+	public void Chain ( IBindableEnumerable enumerable )
     {
-		Executed?.Invoke ( this, EventArgs.Empty );
+		if ( Next != null )
+			throw new InvalidOperationException ( "BindableEnumerable is already part of a chain" );
+
+		Next = enumerable;
     }
 
 	public abstract ICollectionChangeSet ProcessChanges ( ICollectionChangeSet changes );
@@ -77,45 +113,13 @@ public abstract class ExecutableEnumerable < T > : IBindableOrderedEnumerable < 
 		// TODO: Implement method
 		throw new NotImplementedException ( );
     }
-
-    IEnumerator	      IEnumerable      .GetEnumerator ( ) => new Enumerator ( this );
-    IEnumerator < T > IEnumerable < T >.GetEnumerator ( ) => new Enumerator ( this );
-
-	protected abstract IEnumerator < T > GetEnumerator ( );
-
-	private class Enumerator : IEnumerator < T >
-    {
-		readonly ExecutableEnumerable < T > enumerable;
-
-		public Enumerator ( ExecutableEnumerable < T > enumerable )
-        {
-			this.enumerable = enumerable;
-			enumerator = enumerable.GetEnumerator ( );
-        }
-
-		private readonly IEnumerator < T > enumerator;
-
-        public T Current => enumerator.Current;
-
-        object IEnumerator.Current => ( (IEnumerator) enumerator ).Current;
-
-        public bool MoveNext ( ) => enumerator.MoveNext ( );
-        public void Reset ( ) => enumerator.Reset ( );
-
-		public void Dispose ( )
-		{
-			enumerator.Dispose ( );
-			enumerable.NotifyExecuted ( enumerable );
-		}
-    }
 }
 
-public class BindableEnumerable < T > : ExecutableEnumerable < T >
+public class BindableEnumerable < T > : BindableEnumerableBase < T >
 {
 	private readonly IBinding _binding;
 	private IEnumerable<T> _enumerable;
 	private BindableEnumerableOptions _options;
-	private List<IBindableEnumerable>? _chain;
 
     public BindableEnumerable(IBinding binding, IEnumerable<T> enumerable)
     {
@@ -130,34 +134,26 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 
 	public override BindableEnumerableOptions Options => _options;
 
-	public override void NotifyExecuted ( IBindableEnumerable enumerable )
-	{
-		// TODO: Find a way to know the _chain is complete
-		_chain ??= new List<IBindableEnumerable>();
-		if ( enumerable != this && ! _chain.Contains ( enumerable ) )
-			_chain.Add ( enumerable );
-
-		base.NotifyExecuted ( enumerable );
-	}
-
     public override ICollectionChangeSet ProcessChanges ( ICollectionChangeSet changes )
     {
-		if ( _chain == null )
-			throw new InvalidOperationException ( "BindableEnumerable must be enumerated first" );
-
-		foreach ( var op in _chain )
-			changes = op.ProcessChanges ( changes );
+		var next = Next;
+		while ( next != null )
+        {
+			changes = next.ProcessChanges ( changes );
+			next    = next.Next;
+        }
 
 		return changes;
     }
 
     public override void ReportChanges ( IBindableEnumerable enumerable, ICollectionChangeSet changes )
     {
-		if ( _chain == null )
-			throw new InvalidOperationException ( "BindableEnumerable must be enumerated first" );
-
-		foreach ( var op in _chain.SkipWhile ( op => op != enumerable ) )
-			changes = op.ProcessChanges ( changes );
+		var next = enumerable;
+		while ( next != null )
+        {
+			changes = next.ProcessChanges ( changes );
+			next    = next.Next;
+        }
 
 		ApplyChanges ( changes );
     }
@@ -172,17 +168,15 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 
     public override void SetTarget < TElement > ( ICollection < TElement > collection )
     {
-		if ( _chain == null )
-			throw new InvalidOperationException ( "BindableEnumerable must be enumerated first" );
+		var last = (IBindableEnumerable) this;
+		while ( last.Next != null )
+			last = last.Next;
 
-		if ( _chain.Count >  0 && _chain [ ^1 ] is not IEnumerable < TElement > )
-			throw new ArgumentException ( $"Collection element type should be { TypeHelper.FindGenericType ( typeof ( IEnumerable < > ), _chain [ ^1 ].GetType ( ) )?.Name }", nameof ( collection ) );
-
-		if ( _chain.Count == 0 && typeof ( T ) != typeof ( TElement ) )
-			throw new ArgumentException ( $"Collection element type should be { TypeHelper.FindGenericType ( typeof ( IEnumerable < > ), typeof ( T ) )?.Name }", nameof ( collection ) );
+		if ( last is not IEnumerable < TElement > )
+			throw new ArgumentException ( $"Collection element type should be { TypeHelper.FindGenericType ( typeof ( IEnumerable < > ), last.GetType ( ) )?.Name }", nameof ( collection ) );
 
 		applyChanges = changes => collection.ReplicateChanges ( (ICollectionChangeSet < TElement >) changes,
-																(IEnumerable < TElement >) _chain [ ^1 ] );
+																(IEnumerable < TElement >) last );
 
 		if ( subscription != null )
 			Binding.Detach ( subscription );
@@ -197,38 +191,38 @@ public class BindableEnumerable < T > : ExecutableEnumerable < T >
 
 	public override void SetTarget ( Expression expression )
     {
-		Executed += Source_Executed;
-
-		void Source_Executed ( object sender, EventArgs e )
-        {
-            Executed -= Source_Executed;
-
-			applyChanges = changes =>
-			{
-				if ( changes.Count > 0 )
-					Binding.Invalidate ( expression );
-			};
-
-			if ( subscription != null )
-				Binding.Detach ( subscription );
-
-			subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (collection, change) =>
-			{
-				ApplyChanges ( ProcessChanges ( new CollectionChangeSet < T > ( 1 ) { change } ) );
-			} );
-
-			Binding.Attach ( subscription );
-        }
+		applyChanges = changes =>
+		{
+			if ( changes.Count > 0 )
+				Binding.Invalidate ( expression );
+		};
     }
 
-    protected override IEnumerator<T> GetEnumerator() => _enumerable.GetEnumerator();
+    protected override IEnumerator < T > GetEnumerator ( )
+    {
+		return _enumerable.GetEnumerator ( );
+    }
+
+    protected override void Enumerated ( )
+    {
+		if ( subscription != null )
+			Binding.Detach ( subscription );
+
+		subscription = Binding.Services.CollectionSubscriber.Subscribe ( _enumerable, (collection, change) =>
+		{
+			ApplyChanges ( ProcessChanges ( new CollectionChangeSet < T > ( 1 ) { change } ) );
+		} );
+
+		Binding.Attach ( subscription );
+    }
 }
 
-public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumerable < TResult >, IBindableEnumerable < TSource, TResult >
+public abstract class BindableEnumerable < TSource, TResult > : BindableEnumerableBase < TResult >, IBindableEnumerable < TSource, TResult >
 {
 	protected BindableEnumerable(IBindableEnumerable < TSource > parent)
     {
 		Parent = parent;
+		Parent.Chain ( this );
     }
 
 	public override sealed IBinding Binding => Parent.Binding;
@@ -242,15 +236,9 @@ public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumer
 
     protected IBindableEnumerable < TSource > Parent { get; }
 
-    public override sealed void NotifyExecuted ( IBindableEnumerable enumerable )
-	{
-		Parent.NotifyExecuted ( enumerable );
-		base  .NotifyExecuted ( enumerable );
-	}
-
     public override sealed ICollectionChangeSet ProcessChanges ( ICollectionChangeSet changes )
     {
-		return ProcessChanges ( (ICollectionChangeSet<TSource>) changes );
+		return ProcessChanges ( (ICollectionChangeSet < TSource >) changes );
     }
 
     public virtual ICollectionChangeSet < TResult > ProcessChanges ( ICollectionChangeSet < TSource > changes )
@@ -263,6 +251,8 @@ public abstract class BindableEnumerable < TSource, TResult > : ExecutableEnumer
     {
 		Parent.ReportChanges ( enumerable, changes );
     }
+
+    protected override void Enumerated ( ) { }
 }
 
 public class SelectBindableEnumerable < TSource, TResult > : BindableEnumerable < TSource, TResult >
@@ -366,6 +356,7 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
 
 			if ( ! skip )
             {
+				// TODO: Improve index calculation with cached enumerable
 				if ( change.Index >= 0 )
 					change.ChangeIndex ( _visibility.Take ( change.Index ).Count ( v => v ) );
 
