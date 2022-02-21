@@ -104,8 +104,6 @@ public abstract class BindableEnumerableBase < T > : EnumerationTrackingEnumerab
     public abstract ICollectionChangeSet ProcessChanges ( ICollectionChangeSet changes );
 
     public abstract void ReportChanges ( IBindableEnumerable enumerable, ICollectionChangeSet changes );
-
-    IEnumerable IBindableEnumerable.Source => Source;
 }
 
 public class BindableEnumerable < T > : BindableEnumerableBase < T >
@@ -212,7 +210,7 @@ public class BindableEnumerable < T > : BindableEnumerableBase < T >
 
 public abstract class BindableEnumerable < TSource, TResult > : BindableEnumerableBase < TResult >, IBindableEnumerable < TSource, TResult >
 {
-    protected BindableEnumerable(IBindableEnumerable < TSource > parent)
+    protected BindableEnumerable ( IBindableEnumerable < TSource > parent )
     {
         Parent = parent;
         Parent.Chain ( this );
@@ -243,6 +241,18 @@ public abstract class BindableEnumerable < TSource, TResult > : BindableEnumerab
     public override sealed void ReportChanges ( IBindableEnumerable enumerable, ICollectionChangeSet changes )
     {
         Parent.ReportChanges ( enumerable, changes );
+    }
+
+    protected static IDisposable? Caching ( IEnumerable < TSource > source, out IEnumerable < TSource > caching )
+    {
+        // TODO: Add interface or boolean to detect root -or- need for caching
+        if ( source is BindableEnumerable < TSource > root && root.Source is ICollection < TSource > or IReadOnlyCollection < TSource > )
+        {
+            caching = root;
+            return null;
+        }
+
+        return (IDisposable) ( caching = new CachingEnumerable < TSource > ( source ) );
     }
 
     protected override void OnEnumerated ( ) { }
@@ -328,9 +338,11 @@ public class WhereBindableEnumerable < T > : BindableEnumerable < T, T >
     {
         var visibilityChanges = changes.ChangeType ( _compiledPredicate ).ToList ( );
 
-        // TODO: Enumerable wrapper to enumerate Parent only once
-        _items     .ReplicateChanges ( changes,           Parent );
-        _visibility.ReplicateChanges ( visibilityChanges, Parent.Select ( _compiledPredicate ) );
+		using ( Caching ( Parent, out var parent ) )
+		{
+			_items     .ReplicateChanges ( changes,           parent );
+			_visibility.ReplicateChanges ( visibilityChanges, parent.Select ( _compiledPredicate ) );
+		}
 
         for ( var index = visibilityChanges.Count - 1; index >= 0; index-- )
         {
