@@ -1,91 +1,89 @@
 ﻿using System.Linq.Expressions;
 using System.Reflection;
-using Epoxide.ExpressionUtil;
 
-namespace Epoxide.Tests
+namespace Epoxide.ExpressionUtil;
+
+public class UnaryExpressionFingerprintTests
 {
-    public class UnaryExpressionFingerprintTests
+    [Fact]
+    public void Properties()
     {
-        [Fact]
-        public void Properties()
-        {
-            // Arrange
-            ExpressionType expectedNodeType = ExpressionType.Not;
-            Type expectedType = typeof(int);
-            MethodInfo expectedMethod = typeof(object).GetMethod("GetHashCode");
+        // Arrange
+        ExpressionType expectedNodeType = ExpressionType.Not;
+        Type expectedType = typeof(int);
+        MethodInfo expectedMethod = typeof(object).GetMethod("GetHashCode");
 
-            // Act
-            UnaryExpressionFingerprint fingerprint = new UnaryExpressionFingerprint(expectedNodeType, expectedType, expectedMethod);
+        // Act
+        UnaryExpressionFingerprint fingerprint = new UnaryExpressionFingerprint(expectedNodeType, expectedType, expectedMethod);
 
-            // Assert
-            Assert.Equal(expectedNodeType, fingerprint.NodeType);
-            Assert.Equal(expectedType, fingerprint.Type);
-            Assert.Equal(expectedMethod, fingerprint.Method);
-        }
+        // Assert
+        Assert.Equal(expectedNodeType, fingerprint.NodeType);
+        Assert.Equal(expectedType, fingerprint.Type);
+        Assert.Equal(expectedMethod, fingerprint.Method);
+    }
 
-        [Fact]
-        public void Comparison_Equality()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Not;
-            Type type = typeof(int);
-            MethodInfo method = typeof(object).GetMethod("GetHashCode");
+    [Fact]
+    public void Comparison_Equality()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Not;
+        Type type = typeof(int);
+        MethodInfo method = typeof(object).GetMethod("GetHashCode");
 
-            // Act
-            UnaryExpressionFingerprint fingerprint1 = new UnaryExpressionFingerprint(nodeType, type, method);
-            UnaryExpressionFingerprint fingerprint2 = new UnaryExpressionFingerprint(nodeType, type, method);
+        // Act
+        UnaryExpressionFingerprint fingerprint1 = new UnaryExpressionFingerprint(nodeType, type, method);
+        UnaryExpressionFingerprint fingerprint2 = new UnaryExpressionFingerprint(nodeType, type, method);
 
-            // Assert
-            Assert.Equal(fingerprint1, fingerprint2);
-            Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
-        }
+        // Assert
+        Assert.Equal(fingerprint1, fingerprint2);
+        Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
+    }
 
-        [Fact]
-        public void Comparison_Inequality_FingerprintType()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Not;
-            Type type = typeof(int);
-            MethodInfo method = typeof(object).GetMethod("GetHashCode");
+    [Fact]
+    public void Comparison_Inequality_FingerprintType()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Not;
+        Type type = typeof(int);
+        MethodInfo method = typeof(object).GetMethod("GetHashCode");
 
-            // Act
-            UnaryExpressionFingerprint fingerprint1 = new UnaryExpressionFingerprint(nodeType, type, method);
-            DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
+        // Act
+        UnaryExpressionFingerprint fingerprint1 = new UnaryExpressionFingerprint(nodeType, type, method);
+        DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
 
-            // Assert
-            Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
+    }
 
-        [Fact]
-        public void Comparison_Inequality_Method()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Not;
-            Type type = typeof(int);
-            MethodInfo method = typeof(object).GetMethod("GetHashCode");
+    [Fact]
+    public void Comparison_Inequality_Method()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Not;
+        Type type = typeof(int);
+        MethodInfo method = typeof(object).GetMethod("GetHashCode");
 
-            // Act
-            UnaryExpressionFingerprint fingerprint1 = new UnaryExpressionFingerprint(nodeType, type, method);
-            UnaryExpressionFingerprint fingerprint2 = new UnaryExpressionFingerprint(nodeType, type, null /* method */);
+        // Act
+        UnaryExpressionFingerprint fingerprint1 = new UnaryExpressionFingerprint(nodeType, type, method);
+        UnaryExpressionFingerprint fingerprint2 = new UnaryExpressionFingerprint(nodeType, type, null /* method */);
 
-            // Assert
-            Assert.NotEqual(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual(fingerprint1, fingerprint2);
+    }
 
-        [Fact]
-        public void Comparison_Inequality_Type()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Not;
-            Type type = typeof(int);
-            MethodInfo method = typeof(object).GetMethod("GetHashCode");
+    [Fact]
+    public void Comparison_Inequality_Type()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Not;
+        Type type = typeof(int);
+        MethodInfo method = typeof(object).GetMethod("GetHashCode");
 
-            // Act
-            UnaryExpressionFingerprint fingerprint1 = new UnaryExpressionFingerprint(nodeType, type, method);
-            UnaryExpressionFingerprint fingerprint2 = new UnaryExpressionFingerprint(nodeType, typeof(object), method);
+        // Act
+        UnaryExpressionFingerprint fingerprint1 = new UnaryExpressionFingerprint(nodeType, type, method);
+        UnaryExpressionFingerprint fingerprint2 = new UnaryExpressionFingerprint(nodeType, typeof(object), method);
 
-            // Assert
-            Assert.NotEqual(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual(fingerprint1, fingerprint2);
     }
 }

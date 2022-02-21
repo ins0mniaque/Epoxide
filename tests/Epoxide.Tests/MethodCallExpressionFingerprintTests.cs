@@ -1,91 +1,89 @@
 ﻿using System.Linq.Expressions;
 using System.Reflection;
-using Epoxide.ExpressionUtil;
 
-namespace Epoxide.Tests
+namespace Epoxide.ExpressionUtil;
+
+public class MethodCallExpressionFingerprintTests
 {
-    public class MethodCallExpressionFingerprintTests
+    [Fact]
+    public void Properties()
     {
-        [Fact]
-        public void Properties()
-        {
-            // Arrange
-            ExpressionType expectedNodeType = ExpressionType.Call;
-            Type expectedType = typeof(string);
-            MethodInfo expectedMethod = typeof(string).GetMethod("Intern");
+        // Arrange
+        ExpressionType expectedNodeType = ExpressionType.Call;
+        Type expectedType = typeof(string);
+        MethodInfo expectedMethod = typeof(string).GetMethod("Intern");
 
-            // Act
-            MethodCallExpressionFingerprint fingerprint = new MethodCallExpressionFingerprint(expectedNodeType, expectedType, expectedMethod);
+        // Act
+        MethodCallExpressionFingerprint fingerprint = new MethodCallExpressionFingerprint(expectedNodeType, expectedType, expectedMethod);
 
-            // Assert
-            Assert.Equal(expectedNodeType, fingerprint.NodeType);
-            Assert.Equal(expectedType, fingerprint.Type);
-            Assert.Equal(expectedMethod, fingerprint.Method);
-        }
+        // Assert
+        Assert.Equal(expectedNodeType, fingerprint.NodeType);
+        Assert.Equal(expectedType, fingerprint.Type);
+        Assert.Equal(expectedMethod, fingerprint.Method);
+    }
 
-        [Fact]
-        public void Comparison_Equality()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Call;
-            Type type = typeof(string);
-            MethodInfo method = typeof(string).GetMethod("Intern");
+    [Fact]
+    public void Comparison_Equality()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Call;
+        Type type = typeof(string);
+        MethodInfo method = typeof(string).GetMethod("Intern");
 
-            // Act
-            MethodCallExpressionFingerprint fingerprint1 = new MethodCallExpressionFingerprint(nodeType, type, method);
-            MethodCallExpressionFingerprint fingerprint2 = new MethodCallExpressionFingerprint(nodeType, type, method);
+        // Act
+        MethodCallExpressionFingerprint fingerprint1 = new MethodCallExpressionFingerprint(nodeType, type, method);
+        MethodCallExpressionFingerprint fingerprint2 = new MethodCallExpressionFingerprint(nodeType, type, method);
 
-            // Assert
-            Assert.Equal(fingerprint1, fingerprint2);
-            Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
-        }
+        // Assert
+        Assert.Equal(fingerprint1, fingerprint2);
+        Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
+    }
 
-        [Fact]
-        public void Comparison_Inequality_FingerprintType()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Call;
-            Type type = typeof(string);
-            MethodInfo method = typeof(string).GetMethod("Intern");
+    [Fact]
+    public void Comparison_Inequality_FingerprintType()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Call;
+        Type type = typeof(string);
+        MethodInfo method = typeof(string).GetMethod("Intern");
 
-            // Act
-            MethodCallExpressionFingerprint fingerprint1 = new MethodCallExpressionFingerprint(nodeType, type, method);
-            DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
+        // Act
+        MethodCallExpressionFingerprint fingerprint1 = new MethodCallExpressionFingerprint(nodeType, type, method);
+        DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
 
-            // Assert
-            Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
+    }
 
-        [Fact]
-        public void Comparison_Inequality_Method()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Call;
-            Type type = typeof(string);
-            MethodInfo method = typeof(string).GetMethod("Intern");
+    [Fact]
+    public void Comparison_Inequality_Method()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Call;
+        Type type = typeof(string);
+        MethodInfo method = typeof(string).GetMethod("Intern");
 
-            // Act
-            MethodCallExpressionFingerprint fingerprint1 = new MethodCallExpressionFingerprint(nodeType, type, method);
-            MethodCallExpressionFingerprint fingerprint2 = new MethodCallExpressionFingerprint(nodeType, type, null /* method */);
+        // Act
+        MethodCallExpressionFingerprint fingerprint1 = new MethodCallExpressionFingerprint(nodeType, type, method);
+        MethodCallExpressionFingerprint fingerprint2 = new MethodCallExpressionFingerprint(nodeType, type, null /* method */);
 
-            // Assert
-            Assert.NotEqual(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual(fingerprint1, fingerprint2);
+    }
 
-        [Fact]
-        public void Comparison_Inequality_Type()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Call;
-            Type type = typeof(string);
-            MethodInfo method = typeof(string).GetMethod("Intern");
+    [Fact]
+    public void Comparison_Inequality_Type()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Call;
+        Type type = typeof(string);
+        MethodInfo method = typeof(string).GetMethod("Intern");
 
-            // Act
-            MethodCallExpressionFingerprint fingerprint1 = new MethodCallExpressionFingerprint(nodeType, type, method);
-            MethodCallExpressionFingerprint fingerprint2 = new MethodCallExpressionFingerprint(nodeType, typeof(object), method);
+        // Act
+        MethodCallExpressionFingerprint fingerprint1 = new MethodCallExpressionFingerprint(nodeType, type, method);
+        MethodCallExpressionFingerprint fingerprint2 = new MethodCallExpressionFingerprint(nodeType, typeof(object), method);
 
-            // Assert
-            Assert.NotEqual(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual(fingerprint1, fingerprint2);
     }
 }

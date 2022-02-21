@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace Epoxide.Tests;
+namespace Epoxide;
 
 public class ChangeTrackingTests
 {

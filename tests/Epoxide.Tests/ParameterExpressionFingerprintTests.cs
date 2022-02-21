@@ -1,90 +1,88 @@
 ﻿using System.Linq.Expressions;
-using Epoxide.ExpressionUtil;
 
-namespace Epoxide.Tests
+namespace Epoxide.ExpressionUtil;
+
+public class ParameterExpressionFingerprintTests
 {
-    public class ParameterExpressionFingerprintTests
+    [Fact]
+    public void Properties()
     {
-        [Fact]
-        public void Properties()
-        {
-            // Arrange
-            ExpressionType expectedNodeType = ExpressionType.Parameter;
-            Type expectedType = typeof(object);
-            int expectedParameterIndex = 1;
+        // Arrange
+        ExpressionType expectedNodeType = ExpressionType.Parameter;
+        Type expectedType = typeof(object);
+        int expectedParameterIndex = 1;
 
-            // Act
-            ParameterExpressionFingerprint fingerprint = new ParameterExpressionFingerprint(expectedNodeType, expectedType, expectedParameterIndex);
+        // Act
+        ParameterExpressionFingerprint fingerprint = new ParameterExpressionFingerprint(expectedNodeType, expectedType, expectedParameterIndex);
 
-            // Assert
-            Assert.Equal(expectedNodeType, fingerprint.NodeType);
-            Assert.Equal(expectedType, fingerprint.Type);
-            Assert.Equal(expectedParameterIndex, fingerprint.ParameterIndex);
-        }
+        // Assert
+        Assert.Equal(expectedNodeType, fingerprint.NodeType);
+        Assert.Equal(expectedType, fingerprint.Type);
+        Assert.Equal(expectedParameterIndex, fingerprint.ParameterIndex);
+    }
 
-        [Fact]
-        public void Comparison_Equality()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Parameter;
-            Type type = typeof(object);
-            int parameterIndex = 1;
+    [Fact]
+    public void Comparison_Equality()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Parameter;
+        Type type = typeof(object);
+        int parameterIndex = 1;
 
-            // Act
-            ParameterExpressionFingerprint fingerprint1 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
-            ParameterExpressionFingerprint fingerprint2 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
+        // Act
+        ParameterExpressionFingerprint fingerprint1 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
+        ParameterExpressionFingerprint fingerprint2 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
 
-            // Assert
-            Assert.Equal(fingerprint1, fingerprint2);
-            Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
-        }
+        // Assert
+        Assert.Equal(fingerprint1, fingerprint2);
+        Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
+    }
 
-        [Fact]
-        public void Comparison_Inequality_FingerprintType()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Parameter;
-            Type type = typeof(object);
-            int parameterIndex = 1;
+    [Fact]
+    public void Comparison_Inequality_FingerprintType()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Parameter;
+        Type type = typeof(object);
+        int parameterIndex = 1;
 
-            // Act
-            ParameterExpressionFingerprint fingerprint1 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
-            DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
+        // Act
+        ParameterExpressionFingerprint fingerprint1 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
+        DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
 
-            // Assert
-            Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
+    }
 
-        [Fact]
-        public void Comparison_Inequality_Method()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Parameter;
-            Type type = typeof(object);
-            int parameterIndex = 1;
+    [Fact]
+    public void Comparison_Inequality_Method()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Parameter;
+        Type type = typeof(object);
+        int parameterIndex = 1;
 
-            // Act
-            ParameterExpressionFingerprint fingerprint1 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
-            ParameterExpressionFingerprint fingerprint2 = new ParameterExpressionFingerprint(nodeType, type, -1 /* parameterIndex */);
+        // Act
+        ParameterExpressionFingerprint fingerprint1 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
+        ParameterExpressionFingerprint fingerprint2 = new ParameterExpressionFingerprint(nodeType, type, -1 /* parameterIndex */);
 
-            // Assert
-            Assert.NotEqual(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual(fingerprint1, fingerprint2);
+    }
 
-        [Fact]
-        public void Comparison_Inequality_Type()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Parameter;
-            Type type = typeof(object);
-            int parameterIndex = 1;
+    [Fact]
+    public void Comparison_Inequality_Type()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Parameter;
+        Type type = typeof(object);
+        int parameterIndex = 1;
 
-            // Act
-            ParameterExpressionFingerprint fingerprint1 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
-            ParameterExpressionFingerprint fingerprint2 = new ParameterExpressionFingerprint(nodeType, typeof(string), parameterIndex);
+        // Act
+        ParameterExpressionFingerprint fingerprint1 = new ParameterExpressionFingerprint(nodeType, type, parameterIndex);
+        ParameterExpressionFingerprint fingerprint2 = new ParameterExpressionFingerprint(nodeType, typeof(string), parameterIndex);
 
-            // Assert
-            Assert.NotEqual(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual(fingerprint1, fingerprint2);
     }
 }

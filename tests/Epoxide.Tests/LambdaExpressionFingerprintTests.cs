@@ -1,69 +1,67 @@
 ﻿using System.Linq.Expressions;
-using Epoxide.ExpressionUtil;
 
-namespace Epoxide.Tests
+namespace Epoxide.ExpressionUtil;
+
+public class LambdaExpressionFingerprintTests
 {
-    public class LambdaExpressionFingerprintTests
+    [Fact]
+    public void Properties()
     {
-        [Fact]
-        public void Properties()
-        {
-            // Arrange
-            ExpressionType expectedNodeType = ExpressionType.Lambda;
-            Type expectedType = typeof(Action<object>);
+        // Arrange
+        ExpressionType expectedNodeType = ExpressionType.Lambda;
+        Type expectedType = typeof(Action<object>);
 
-            // Act
-            LambdaExpressionFingerprint fingerprint = new LambdaExpressionFingerprint(expectedNodeType, expectedType);
+        // Act
+        LambdaExpressionFingerprint fingerprint = new LambdaExpressionFingerprint(expectedNodeType, expectedType);
 
-            // Assert
-            Assert.Equal(expectedNodeType, fingerprint.NodeType);
-            Assert.Equal(expectedType, fingerprint.Type);
-        }
+        // Assert
+        Assert.Equal(expectedNodeType, fingerprint.NodeType);
+        Assert.Equal(expectedType, fingerprint.Type);
+    }
 
-        [Fact]
-        public void Comparison_Equality()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Lambda;
-            Type type = typeof(Action<object>);
+    [Fact]
+    public void Comparison_Equality()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Lambda;
+        Type type = typeof(Action<object>);
 
-            // Act
-            LambdaExpressionFingerprint fingerprint1 = new LambdaExpressionFingerprint(nodeType, type);
-            LambdaExpressionFingerprint fingerprint2 = new LambdaExpressionFingerprint(nodeType, type);
+        // Act
+        LambdaExpressionFingerprint fingerprint1 = new LambdaExpressionFingerprint(nodeType, type);
+        LambdaExpressionFingerprint fingerprint2 = new LambdaExpressionFingerprint(nodeType, type);
 
-            // Assert
-            Assert.Equal(fingerprint1, fingerprint2);
-            Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
-        }
+        // Assert
+        Assert.Equal(fingerprint1, fingerprint2);
+        Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
+    }
 
-        [Fact]
-        public void Comparison_Inequality_FingerprintType()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Lambda;
-            Type type = typeof(Action<object>);
+    [Fact]
+    public void Comparison_Inequality_FingerprintType()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Lambda;
+        Type type = typeof(Action<object>);
 
-            // Act
-            LambdaExpressionFingerprint fingerprint1 = new LambdaExpressionFingerprint(nodeType, type);
-            DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
+        // Act
+        LambdaExpressionFingerprint fingerprint1 = new LambdaExpressionFingerprint(nodeType, type);
+        DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
 
-            // Assert
-            Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
+    }
 
-        [Fact]
-        public void Comparison_Inequality_NodeType()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Lambda;
-            Type type = typeof(Action<object>);
+    [Fact]
+    public void Comparison_Inequality_NodeType()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Lambda;
+        Type type = typeof(Action<object>);
 
-            // Act
-            LambdaExpressionFingerprint fingerprint1 = new LambdaExpressionFingerprint(nodeType, type);
-            LambdaExpressionFingerprint fingerprint2 = new LambdaExpressionFingerprint(nodeType, typeof(Action));
+        // Act
+        LambdaExpressionFingerprint fingerprint1 = new LambdaExpressionFingerprint(nodeType, type);
+        LambdaExpressionFingerprint fingerprint2 = new LambdaExpressionFingerprint(nodeType, typeof(Action));
 
-            // Assert
-            Assert.NotEqual(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual(fingerprint1, fingerprint2);
     }
 }

@@ -1,69 +1,67 @@
 ﻿using System.Linq.Expressions;
-using Epoxide.ExpressionUtil;
 
-namespace Epoxide.Tests
+namespace Epoxide.ExpressionUtil;
+
+public class DefaultExpressionFingerprintTests
 {
-    public class DefaultExpressionFingerprintTests
+    [Fact]
+    public void Properties()
     {
-        [Fact]
-        public void Properties()
-        {
-            // Arrange
-            ExpressionType expectedNodeType = ExpressionType.Default;
-            Type expectedType = typeof(object);
+        // Arrange
+        ExpressionType expectedNodeType = ExpressionType.Default;
+        Type expectedType = typeof(object);
 
-            // Act
-            DefaultExpressionFingerprint fingerprint = new DefaultExpressionFingerprint(expectedNodeType, expectedType);
+        // Act
+        DefaultExpressionFingerprint fingerprint = new DefaultExpressionFingerprint(expectedNodeType, expectedType);
 
-            // Assert
-            Assert.Equal(expectedNodeType, fingerprint.NodeType);
-            Assert.Equal(expectedType, fingerprint.Type);
-        }
+        // Assert
+        Assert.Equal(expectedNodeType, fingerprint.NodeType);
+        Assert.Equal(expectedType, fingerprint.Type);
+    }
 
-        [Fact]
-        public void Comparison_Equality()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Default;
-            Type type = typeof(object);
+    [Fact]
+    public void Comparison_Equality()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Default;
+        Type type = typeof(object);
 
-            // Act
-            DefaultExpressionFingerprint fingerprint1 = new DefaultExpressionFingerprint(nodeType, type);
-            DefaultExpressionFingerprint fingerprint2 = new DefaultExpressionFingerprint(nodeType, type);
+        // Act
+        DefaultExpressionFingerprint fingerprint1 = new DefaultExpressionFingerprint(nodeType, type);
+        DefaultExpressionFingerprint fingerprint2 = new DefaultExpressionFingerprint(nodeType, type);
 
-            // Assert
-            Assert.Equal(fingerprint1, fingerprint2);
-            Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
-        }
+        // Assert
+        Assert.Equal(fingerprint1, fingerprint2);
+        Assert.Equal(fingerprint1.GetHashCode(), fingerprint2.GetHashCode());
+    }
 
-        [Fact]
-        public void Comparison_Inequality_FingerprintType()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Default;
-            Type type = typeof(object);
+    [Fact]
+    public void Comparison_Inequality_FingerprintType()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Default;
+        Type type = typeof(object);
 
-            // Act
-            DefaultExpressionFingerprint fingerprint1 = new DefaultExpressionFingerprint(nodeType, type);
-            DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
+        // Act
+        DefaultExpressionFingerprint fingerprint1 = new DefaultExpressionFingerprint(nodeType, type);
+        DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
 
-            // Assert
-            Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual<ExpressionFingerprint>(fingerprint1, fingerprint2);
+    }
 
-        [Fact]
-        public void Comparison_Inequality_NodeType()
-        {
-            // Arrange
-            ExpressionType nodeType = ExpressionType.Default;
-            Type type = typeof(object);
+    [Fact]
+    public void Comparison_Inequality_NodeType()
+    {
+        // Arrange
+        ExpressionType nodeType = ExpressionType.Default;
+        Type type = typeof(object);
 
-            // Act
-            DefaultExpressionFingerprint fingerprint1 = new DefaultExpressionFingerprint(nodeType, type);
-            DefaultExpressionFingerprint fingerprint2 = new DefaultExpressionFingerprint(nodeType, typeof(string));
+        // Act
+        DefaultExpressionFingerprint fingerprint1 = new DefaultExpressionFingerprint(nodeType, type);
+        DefaultExpressionFingerprint fingerprint2 = new DefaultExpressionFingerprint(nodeType, typeof(string));
 
-            // Assert
-            Assert.NotEqual(fingerprint1, fingerprint2);
-        }
+        // Assert
+        Assert.NotEqual(fingerprint1, fingerprint2);
     }
 }
