@@ -2,7 +2,9 @@ using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.ComponentModel;
 
-namespace Epoxide;
+using Epoxide.Collections;
+
+namespace Epoxide.ChangeTracking;
 
 public interface ICollectionSubscriber
 {

@@ -3,7 +3,7 @@ using System.ComponentModel;
 using System.Linq.Expressions;
 using System.Reflection;
 
-namespace Epoxide;
+namespace Epoxide.ChangeTracking;
 
 public interface IMemberSubscriber
 {

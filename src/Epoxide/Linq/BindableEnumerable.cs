@@ -2,9 +2,12 @@
 using System.Linq.Expressions;
 using System.Reflection;
 
-using Epoxide.Linq;
+using Epoxide.ChangeTracking;
+using Epoxide.Collections;
+using Epoxide.Disposables;
+using Epoxide.Linq.Expressions;
 
-namespace Epoxide;
+namespace Epoxide.Linq;
 
 public sealed class BindableEnumerableOptions
 {

@@ -1,6 +1,6 @@
 ﻿using System.Linq.Expressions;
 
-namespace Epoxide.ExpressionUtil;
+namespace Epoxide.Linq.Expressions.Fingerprints;
 
 public class ExpressionFingerprintTests
 {

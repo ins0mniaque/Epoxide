@@ -3,6 +3,8 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 
+using Epoxide.Linq;
+
 namespace Epoxide;
 
 public static class Sentinel

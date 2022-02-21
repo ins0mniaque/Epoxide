@@ -2,7 +2,7 @@
 using System.Reflection;
 using System.Text;
 
-namespace Epoxide.ExpressionUtil;
+namespace Epoxide.Linq.Expressions.Fingerprints;
 
 public class FingerprintingExpressionVisitorTests
 {

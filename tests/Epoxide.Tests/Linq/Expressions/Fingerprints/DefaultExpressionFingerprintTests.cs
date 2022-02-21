@@ -1,18 +1,18 @@
 ﻿using System.Linq.Expressions;
 
-namespace Epoxide.ExpressionUtil;
+namespace Epoxide.Linq.Expressions.Fingerprints;
 
-public class ConditionalExpressionFingerprintTests
+public class DefaultExpressionFingerprintTests
 {
     [Fact]
     public void Properties()
     {
         // Arrange
-        ExpressionType expectedNodeType = ExpressionType.Conditional;
+        ExpressionType expectedNodeType = ExpressionType.Default;
         Type expectedType = typeof(object);
 
         // Act
-        ConditionalExpressionFingerprint fingerprint = new ConditionalExpressionFingerprint(expectedNodeType, expectedType);
+        DefaultExpressionFingerprint fingerprint = new DefaultExpressionFingerprint(expectedNodeType, expectedType);
 
         // Assert
         Assert.Equal(expectedNodeType, fingerprint.NodeType);
@@ -23,12 +23,12 @@ public class ConditionalExpressionFingerprintTests
     public void Comparison_Equality()
     {
         // Arrange
-        ExpressionType nodeType = ExpressionType.Conditional;
+        ExpressionType nodeType = ExpressionType.Default;
         Type type = typeof(object);
 
         // Act
-        ConditionalExpressionFingerprint fingerprint1 = new ConditionalExpressionFingerprint(nodeType, type);
-        ConditionalExpressionFingerprint fingerprint2 = new ConditionalExpressionFingerprint(nodeType, type);
+        DefaultExpressionFingerprint fingerprint1 = new DefaultExpressionFingerprint(nodeType, type);
+        DefaultExpressionFingerprint fingerprint2 = new DefaultExpressionFingerprint(nodeType, type);
 
         // Assert
         Assert.Equal(fingerprint1, fingerprint2);
@@ -39,11 +39,11 @@ public class ConditionalExpressionFingerprintTests
     public void Comparison_Inequality_FingerprintType()
     {
         // Arrange
-        ExpressionType nodeType = ExpressionType.Conditional;
+        ExpressionType nodeType = ExpressionType.Default;
         Type type = typeof(object);
 
         // Act
-        ConditionalExpressionFingerprint fingerprint1 = new ConditionalExpressionFingerprint(nodeType, type);
+        DefaultExpressionFingerprint fingerprint1 = new DefaultExpressionFingerprint(nodeType, type);
         DummyExpressionFingerprint fingerprint2 = new DummyExpressionFingerprint(nodeType, type);
 
         // Assert
@@ -51,15 +51,15 @@ public class ConditionalExpressionFingerprintTests
     }
 
     [Fact]
-    public void Comparison_Inequality_Type()
+    public void Comparison_Inequality_NodeType()
     {
         // Arrange
-        ExpressionType nodeType = ExpressionType.Conditional;
+        ExpressionType nodeType = ExpressionType.Default;
         Type type = typeof(object);
 
         // Act
-        ConditionalExpressionFingerprint fingerprint1 = new ConditionalExpressionFingerprint(nodeType, type);
-        ConditionalExpressionFingerprint fingerprint2 = new ConditionalExpressionFingerprint(nodeType, typeof(string));
+        DefaultExpressionFingerprint fingerprint1 = new DefaultExpressionFingerprint(nodeType, type);
+        DefaultExpressionFingerprint fingerprint2 = new DefaultExpressionFingerprint(nodeType, typeof(string));
 
         // Assert
         Assert.NotEqual(fingerprint1, fingerprint2);

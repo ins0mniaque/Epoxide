@@ -1,5 +1,7 @@
 using System.ComponentModel;
 
+using Epoxide.Linq;
+
 namespace Epoxide;
 
 public class BindingTests

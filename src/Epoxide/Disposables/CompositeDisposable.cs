@@ -1,4 +1,4 @@
-﻿namespace Epoxide;
+﻿namespace Epoxide.Disposables;
 
 /// <summary>
 /// Represents a group of disposable resources that are disposed together.

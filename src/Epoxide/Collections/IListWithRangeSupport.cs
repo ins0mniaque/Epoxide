@@ -1,4 +1,4 @@
-﻿namespace Epoxide;
+﻿namespace Epoxide.Collections;
 
 public interface IListWithRangeSupport < T > : IList < T >
 {

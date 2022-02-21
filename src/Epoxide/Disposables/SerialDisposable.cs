@@ -1,4 +1,4 @@
-﻿namespace Epoxide;
+﻿namespace Epoxide.Disposables;
 
 /// <summary>
 /// Represents a disposable resource whose underlying disposable resource can be replaced by another disposable resource, causing automatic disposal of the previous underlying disposable resource.

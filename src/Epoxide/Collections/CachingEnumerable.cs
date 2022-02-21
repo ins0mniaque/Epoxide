@@ -1,7 +1,7 @@
 ﻿using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 
-namespace Epoxide;
+namespace Epoxide.Collections;
 
 public sealed class CachingEnumerable < T > : IEnumerable < T >, IDisposable
 {

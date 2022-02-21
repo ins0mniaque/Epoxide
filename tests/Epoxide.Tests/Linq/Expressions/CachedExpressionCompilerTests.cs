@@ -1,7 +1,7 @@
 ﻿using System.Linq.Expressions;
 using System.Text;
 
-namespace Epoxide;
+namespace Epoxide.Linq.Expressions;
 
 public class CachedExpressionCompilerTests
 {

@@ -1,7 +1,7 @@
 ﻿using System.Linq.Expressions;
 using System.Reflection;
 
-namespace Epoxide.ExpressionUtil;
+namespace Epoxide.Linq.Expressions.Fingerprints;
 
 public class MethodCallExpressionFingerprintTests
 {
