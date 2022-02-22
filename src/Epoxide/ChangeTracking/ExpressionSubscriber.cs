@@ -62,25 +62,29 @@ public sealed class ExpressionSubscription < TSource > : IDisposable
         // TODO: Group by scheduler, then schedule
         foreach ( var t in triggers )
         {
+            t.Access      ?.Dispose ( );
             t.Subscription?.Dispose ( );
-            t.Subscription = t.Accessor.Read ( source, t, ReadAndSubscribe );
+            t.Subscription = null;
+            t.Access       = t.Accessor.Read ( source, t, ReadAndSubscribe );
         }
     }
 
     private void ReadAndSubscribe ( TSource source, Trigger < TSource > t, ExpressionReadResult result )
     {
+        t.Access = null;
+
         if ( result.Succeeded && result.Value != null )
             t.Subscription = services.MemberSubscriber.Subscribe ( result.Value, t.Member, (o, m) => callback ( t.Accessor.Expression, Source, o, m ) );
-        else
-            t.Subscription = null;
     }
 
     public void Unsubscribe ( )
     {
         foreach ( var t in triggers )
         {
+            t.Access      ?.Dispose ( );
             t.Subscription?.Dispose ( );
             t.Subscription = null;
+            t.Access       = null;
         }
     }
 
@@ -92,6 +96,7 @@ public sealed class Trigger < TSource >
 {
     public ExpressionAccessor < TSource > Accessor;
     public MemberInfo Member;
+    public IDisposable? Access;
     public IDisposable? Subscription;
 
     public static List < Trigger < TSource > > ExtractTriggers ( IBinderServices services, LambdaExpression lambda )
