@@ -200,50 +200,6 @@ public interface IBinding < TSource > : IBinding
     TSource Source { get; set; }
 }
 
-// TODO: Merge all helper methods as extensions
-public static class ExprHelper
-{
-    public static bool IsWritable ( Expression expr )
-    {
-        return expr.NodeType == ExpressionType.MemberAccess &&
-               ( (MemberExpression) expr ).Member is PropertyInfo { CanWrite: true } or FieldInfo;
-    }
-
-    public static Type [ ]? GetGenericInterfaceArguments(Type type, Type genericInterface)
-    {
-        foreach (Type @interface in type.GetInterfaces())
-        {
-            if (@interface.IsGenericType)
-            {
-                if (@interface.GetGenericTypeDefinition() == genericInterface)
-                {
-                    return @interface.GetGenericArguments();
-                }
-            }
-        }
-
-        return null;
-    }
-
-    public static void SetValue ( this MemberInfo member, object target, object? value )
-    {
-        if ( member is PropertyInfo p )
-        {
-            if ( p.CanWrite )
-            {
-                p.SetValue ( target, value, null );
-            }
-            else
-                throw new InvalidOperationException("Trying to SetValue on read-only property " + p.Name );
-        }
-
-        else if ( member is FieldInfo f )
-            f.SetValue ( target, value );
-        else
-            throw new InvalidOperationException ( "Cannot set value of " + member.GetType ( ).Name );
-    }
-}
-
 public interface IScheduler
 {
     IDisposable Schedule < TState > ( TState state, Action < TState > action );
@@ -313,9 +269,9 @@ public sealed class Binding < TSource > : IBinding < TSource >
         else
         {
             // TODO: BindingException + nicer Expression.ToString ( )
-            if ( leftBody.NodeType == ExpressionType.Convert && leftBody.Type == rightBody.Type && ExprHelper.IsWritable ( ( (UnaryExpression) leftBody ).Operand ) )
+            if ( leftBody.NodeType == ExpressionType.Convert && leftBody.Type == rightBody.Type && ( (UnaryExpression) leftBody ).Operand.IsWritable ( ) )
                 throw new ArgumentException ( $"Cannot assign { leftBody.Type } to { ( (UnaryExpression) leftBody ).Operand.Type }" );
-            else if ( rightBody.NodeType == ExpressionType.Convert && rightBody.Type == leftBody.Type && ExprHelper.IsWritable ( ( (UnaryExpression) rightBody ).Operand ) )
+            else if ( rightBody.NodeType == ExpressionType.Convert && rightBody.Type == leftBody.Type && ( (UnaryExpression) rightBody ).Operand.IsWritable ( ) )
                 throw new ArgumentException ( $"Cannot assign { rightBody.Type } to { ( (UnaryExpression) rightBody ).Operand.Type }" );
             
             throw new ArgumentException ( $"Neither side is writable { leftBody } == { rightBody }" );

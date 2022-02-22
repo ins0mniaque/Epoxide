@@ -82,8 +82,8 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
     public ExpressionAccessor ( LambdaExpression expression )
     {
         Expression   = expression ?? throw new ArgumentNullException ( nameof ( expression ) );
-        IsCollection = ExprHelper.GetGenericInterfaceArguments ( expression.Body.Type, typeof ( ICollection < > ) ) != null;
-        IsWritable   = ExprHelper.IsWritable ( expression.Body );
+        IsCollection = expression.Body.Type.GetGenericInterfaceArguments ( typeof ( ICollection < > ) ) != null;
+        IsWritable   = expression.Body.IsWritable ( );
     }
 
     public LambdaExpression Expression   { get; }

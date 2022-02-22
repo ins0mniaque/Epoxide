@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Reflection;
 
 using Epoxide.Collections;
+using Epoxide.Linq.Expressions;
 
 namespace Epoxide.ChangeTracking;
 
@@ -63,7 +64,7 @@ public static class CollectionChange
     {
         bindCollectionsMethod ??= new Func < ICollectionSubscriber, ICollection < object >, ICollection < object >, IDisposable? > ( BindCollections ).Method.GetGenericMethodDefinition ( );
 
-        var elementType     = ExprHelper.GetGenericInterfaceArguments ( collection.GetType ( ), typeof ( ICollection < > ) ) [ 0 ];
+        var elementType     = collection.GetType ( ).GetGenericInterfaceArguments ( typeof ( ICollection < > ) ) [ 0 ];
         var bindCollections = bindCollectionsMethod.MakeGenericMethod ( elementType );
 
         return (IDisposable?) bindCollections.Invoke ( null, new [ ] { subscriber, collection, enumerable } );

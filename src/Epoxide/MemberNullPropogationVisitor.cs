@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 
 using Epoxide.Linq;
+using Epoxide.Linq.Expressions;
 
 namespace Epoxide;
 
@@ -19,26 +19,13 @@ public static class Sentinel
         if ( node.NodeType == ExpressionType.Coalesce && ( (BinaryExpression) node ).Right is ConstantExpression )
             return node;
 
-        if ( ! IsNullable ( node.Type ) || node.NodeType == ExpressionType.MemberAccess && IsClosure ( ( (MemberExpression) node ).Expression ) )
+        if ( ! node.IsNullable ( ) || node.NodeType == ExpressionType.MemberAccess && ( (MemberExpression) node ).Expression.IsClosure ( ) )
             return node;
 
         if ( node.Type != typeof ( object ) )
             node = Expression.Convert ( node, typeof ( object ) );
 
         return Expression.Coalesce ( node, Expression.Constant ( Value ) );
-    }
-
-    private static bool IsClosure ( Expression ex )
-    {
-        return Attribute.IsDefined ( ex.Type, typeof ( CompilerGeneratedAttribute ) );
-    }
-
-    private static bool IsNullable(Type type)
-    {
-        if (type.IsClass)
-            return true;
-        return type.IsGenericType &&
-            type.GetGenericTypeDefinition() == typeof(Nullable<>);
     }
 
     private static readonly NullPropagationVisitor          nullPropagationVisitor = new ( );
@@ -53,127 +40,127 @@ public static class Sentinel
 // TODO: Fix simple field accesses being transformed in variables
 public class NullPropagationVisitor : ExpressionVisitor
 {
-    protected override Expression VisitUnary(UnaryExpression node)
+    protected override Expression VisitUnary ( UnaryExpression node )
     {
-        if (node.Operand is MemberExpression mem)
-            return VisitMember(mem);
+        if ( node.Operand is MemberExpression member )
+            return VisitMember ( member );
 
-        if (node.Operand is MethodCallExpression met)
-            return VisitMethodCall(met);
+        if ( node.Operand is MethodCallExpression method )
+            return VisitMethodCall ( method );
 
-        if (node.Operand is ConditionalExpression cond)
-            return Expression.Condition(
-                    test: cond.Test,
-                    ifTrue: MakeNullable(Visit(cond.IfTrue)),
-                    ifFalse: MakeNullable(Visit(cond.IfFalse)));
+        if ( node.Operand is ConditionalExpression condition )
+            return Expression.Condition ( test:    condition.Test,
+                                          ifTrue:  Visit ( condition.IfTrue  ).MakeNullable ( ),
+                                          ifFalse: Visit ( condition.IfFalse ).MakeNullable ( ) );
 
         // TODO: Fix support for lambdas
-        if (node.Operand is LambdaExpression lambda)
+        if ( node.Operand is LambdaExpression lambda )
             return node;
 
-        return base.VisitUnary(node);
+        return base.VisitUnary ( node );
     }
 
     protected override Expression VisitBinary ( BinaryExpression node )
     {
         if ( node.NodeType == ExpressionType.Coalesce )
-            return Expression.Coalesce ( MakeNullable(Visit(node.Left)),
-                                         MakeNullable(Visit(node.Right)) );
+            return Expression.Coalesce ( Visit ( node.Left  ).MakeNullable ( ),
+                                         Visit ( node.Right ).MakeNullable ( ) );
 
         return base.VisitBinary ( node );
     }
 
-    protected override Expression VisitMember(MemberExpression node)
+    protected override Expression VisitMember ( MemberExpression node )
     {
-        if ( IsClosure ( node.Expression ) )
+        if ( node.Expression.IsClosure ( ) )
             return base.VisitMember ( node );
 
-        return PropagateNull(node.Expression, node);
+        return PropagateNull ( node.Expression, node );
     }
 
-    protected override Expression VisitMethodCall(MethodCallExpression node)
+    protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
         // TODO: Fix support for functions (NodeType == Parameter)
         if ( node.Object == null || node.Object.NodeType == ExpressionType.Parameter )
            return node;
 
-        return PropagateNull(node.Object, node);
+        return PropagateNull ( node.Object, node );
     }
 
-    private BlockExpression PropagateNull(Expression instance, Expression propertyAccess)
+    private BlockExpression PropagateNull ( Expression instance, Expression propertyAccess )
     {
-        var safe = base.Visit(instance);
-        var caller = Expression.Variable(safe.Type, "caller");
-        var assign = Expression.Assign(caller, safe);
-        var acess = MakeNullable(new ExpressionReplacer(instance,
-                IsNullableStruct(instance) ? caller : RemoveNullable(caller)).Visit(propertyAccess));
-        var ternary = Expression.Condition(
-                    test: Expression.Equal(caller, Expression.Constant(null)),
-                    ifTrue: Expression.Constant(null, acess.Type),
-                    ifFalse: acess);
+        var safe    = Visit ( instance );
+        var caller  = Expression.Variable ( safe.Type, GenerateVariableName ( safe ) );
+        var assign  = Expression.Assign   ( caller, safe );
+        var cast    = instance.IsNullableStruct ( ) ? caller : caller.RemoveNullable ( );
+        var access  = new ExpressionReplacer ( node => node == instance ? cast : node ).Visit ( propertyAccess ).MakeNullable ( );
+        var ternary = Expression.Condition ( test:    Expression.Equal ( caller, Expression.Constant ( null ) ),
+                                             ifTrue:  Expression.Constant ( null, access.Type ),
+                                             ifFalse: access );
 
-        return Expression.Block(
-            type: acess.Type,
-            variables: new[]
-            {
-                caller,
-            },
-            expressions: new Expression[]
-            {
-                assign,
-                ternary,
-            });
+        return Expression.Block ( type:        access.Type,
+                                  variables:   new [ ] { caller },
+                                  expressions: new Expression [ ]
+                                  {
+                                      assign,
+                                      ternary
+                                  } );
     }
 
-    private static bool IsClosure ( Expression node )
+    // TODO: Generate better variable names
+    private static string GenerateVariableName ( Expression instance )
     {
-        return Attribute.IsDefined ( node.Type, typeof ( CompilerGeneratedAttribute ) );
+        return "caller";
+    }
+}
+
+public class ExpressionReplacer : ExpressionVisitor
+{
+    private readonly Func < Expression, Expression > replace;
+
+    public ExpressionReplacer ( Func < Expression, Expression > replace )
+    {
+        this.replace = replace;
     }
 
-    private static Expression MakeNullable(Expression node)
+    public override Expression Visit ( Expression node )
     {
-        if (IsNullable(node))
-            return node;
+        if ( node != null && replace ( node ) is { } replaced && replaced != node )
+            return replaced;
 
-        return Expression.Convert(node, typeof(Nullable<>).MakeGenericType(node.Type));
+        return base.Visit ( node );
+    }
+}
+
+public class ExpressionSplitter : ExpressionVisitor
+{
+    private readonly Func<Expression, bool> predicate;
+    private Expression? split;
+    private ParameterExpression? parameter;
+
+    public ExpressionSplitter(Func<Expression, bool> predicate)
+    {
+        this.predicate = predicate;
     }
 
-    private static bool IsNullable(Expression node)
+    public bool TrySplit ( Expression node, [NotNullWhen(true)] out Expression? left, [NotNullWhen(true)] out LambdaExpression? right )
     {
-        return !node.Type.IsValueType || (Nullable.GetUnderlyingType(node.Type) != null);
+        var body = Visit ( node );
+
+        left  = split;
+        right = split != null ? Expression.Lambda ( body, parameter ) : null;
+
+        return left != null;
     }
 
-    private static bool IsNullableStruct(Expression node)
+    public override Expression Visit ( Expression node )
     {
-        return node.Type.IsValueType && (Nullable.GetUnderlyingType(node.Type) != null);
-    }
-
-    private static Expression RemoveNullable(Expression node)
-    {
-        if (IsNullableStruct(node))
-            return Expression.Convert(node, node.Type.GenericTypeArguments[0]);
-
-        return node;
-    }
-
-    private class ExpressionReplacer : ExpressionVisitor
-    {
-        private readonly Expression oldNode;
-        private readonly Expression newNode;
-
-        internal ExpressionReplacer(Expression oldNode, Expression newNode)
+        if ( node != null && predicate ( node ) )
         {
-            this.oldNode = oldNode;
-            this.newNode = newNode;
+            split = node;
+            return parameter = Expression.Parameter(node.Type);
         }
 
-        public override Expression Visit(Expression node)
-        {
-            if (node == oldNode)
-                return newNode;
-
-            return base.Visit(node);
-        }
+        return base.Visit ( node );
     }
 }
 
@@ -297,7 +284,7 @@ public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
         var genericTypeCount = method.GetGenericArguments ( ).Length;
         var argumentTypes    = GetEnumerableMethodArgumentTypes ( method );
 
-        var bindableEnumerableMethod = bindableEnumerableMethods [ method.Name ].FirstOrDefault ( q => ( q.Method.ReturnType.IsGenericType && ExprHelper.GetGenericInterfaceArguments ( q.Method.ReturnType, typeof(IEnumerable<>)) != null ||
+        var bindableEnumerableMethod = bindableEnumerableMethods [ method.Name ].FirstOrDefault ( q => ( q.Method.ReturnType.IsGenericType && q.Method.ReturnType.GetGenericInterfaceArguments(typeof(IEnumerable<>)) != null ||
                                                                                                          q.Method.ReturnType == method.ReturnType ) &&
                                                                                                        q.GenericTypeCount == genericTypeCount &&
                                                                                                        q.ArgumentTypes.SequenceEqual ( argumentTypes ) );
@@ -342,7 +329,7 @@ public class AggregateInvalidatorVisitor : ExpressionVisitor
             return Expression.Call ( invalidates.MakeGenericMethod ( node.Method.GetGenericArguments ( ) ), node, Expression.Constant ( node.Arguments [ 0 ] ) );
         }
 
-        if ( node.Method.DeclaringType != typeof ( BindableEnumerable ) || ExprHelper.GetGenericInterfaceArguments ( node.Method.ReturnType, typeof ( IBindableEnumerable < > ) ) != null )
+        if ( node.Method.DeclaringType != typeof ( BindableEnumerable ) || node.Method.ReturnType.GetGenericInterfaceArguments ( typeof ( IBindableEnumerable < > ) ) != null )
             return node;
 
         return base.VisitMethodCall ( node );
@@ -389,38 +376,5 @@ public class TaskResultToBindableTaskVisitor : ExpressionVisitor
         return node.NodeType == ExpressionType.MemberAccess &&
                ( (MemberExpression) node ).Member.Name == nameof ( Task < object >.Result ) &&
                ( (MemberExpression) node ).Member.DeclaringType.BaseType == typeof ( Task );
-    }
-
-    private class ExpressionSplitter : ExpressionVisitor
-    {
-        private readonly Func<Expression, bool> predicate;
-        private Expression? split;
-        private ParameterExpression? parameter;
-
-        public ExpressionSplitter(Func<Expression, bool> predicate)
-        {
-            this.predicate = predicate;
-        }
-
-        public bool TrySplit ( Expression node, [NotNullWhen(true)] out Expression? left, [NotNullWhen(true)] out LambdaExpression? right )
-        {
-            var body = Visit ( node );
-
-            left  = split;
-            right = split != null ? Expression.Lambda ( body, parameter ) : null;
-
-            return left != null;
-        }
-
-        public override Expression Visit ( Expression node )
-        {
-            if ( node != null && predicate ( node ) )
-            {
-                split = node;
-                return parameter = Expression.Parameter(node.Type);
-            }
-
-            return base.Visit ( node );
-        }
     }
 }
