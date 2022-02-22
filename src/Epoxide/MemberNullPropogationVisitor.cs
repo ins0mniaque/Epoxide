@@ -357,10 +357,9 @@ public class TaskResultToBindableTaskVisitor : ExpressionVisitor
     {
         var splitter = new ExpressionSplitter ( IsTaskResult );
 
-        // TODO: Sentinel support for right part
         if ( splitter.TrySplit ( node, out var left, out var right ) )
         {
-            await ??= typeof ( BindableTask ).GetMethod ( nameof ( BindableTask.Create ) );
+            await ??= typeof ( Awaitable ).GetMethod ( nameof ( Awaitable.AsAwaitable ) );
 
             var task = ( (MemberExpression) left ).Expression;
 
