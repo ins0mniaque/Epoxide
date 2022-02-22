@@ -4,6 +4,11 @@ using Epoxide.Disposables;
 
 namespace Epoxide;
 
+public interface IAwaitable
+{
+    IDisposable Await < TState > ( TState state, Action < TState, object?, Exception? > callback );
+}
+
 // TODO: Add IAsyncEnumerable/IObservable support
 public static class Awaitable
 {

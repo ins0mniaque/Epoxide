@@ -199,7 +199,7 @@ public class EnumerableToCollectionVisitor : ExpressionVisitor
             if ( typeof ( ICollection         < > ).MakeGenericType ( elementType ).IsAssignableFrom ( ReturnType ) ||
                  typeof ( IReadOnlyCollection < > ).MakeGenericType ( elementType ).IsAssignableFrom ( ReturnType ) )
             {
-                toListMethod ??= new Func<IEnumerable<object>, List<object>>(BindableEnumerable.ToList<List<object>, object>).GetMethodInfo().GetGenericMethodDefinition();
+                toListMethod ??= new Func<IEnumerable<object>, List<object>>(BindableEnumerable.ToList<List<object>, object>).Method.GetGenericMethodDefinition();
 
                 // TODO: Replace ObservableCollection with own collection
                 var collectionType = ReturnType;
@@ -239,7 +239,7 @@ public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
 
             if ( Binding != null )
             {
-                asBindableBindingMethod ??= new Func<IEnumerable<object>, IBinding, IBindableEnumerable<object>>(BindableEnumerable.AsBindable<object>).GetMethodInfo().GetGenericMethodDefinition();
+                asBindableBindingMethod ??= new Func<IEnumerable<object>, IBinding, IBindableEnumerable<object>>(BindableEnumerable.AsBindable<object>).Method.GetGenericMethodDefinition();
 
                 var arg0 = Visit ( node.Arguments [ 0 ] );
 
@@ -253,7 +253,7 @@ public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
             }
             else
             {
-                asBindableDefaultMethod ??= new Func<IEnumerable<object>, IBindableEnumerable<object>>(BindableEnumerable.AsBindable<object>).GetMethodInfo().GetGenericMethodDefinition();
+                asBindableDefaultMethod ??= new Func<IEnumerable<object>, IBindableEnumerable<object>>(BindableEnumerable.AsBindable<object>).Method.GetGenericMethodDefinition();
 
                 var arg0 = Visit ( node.Arguments [ 0 ] );
 

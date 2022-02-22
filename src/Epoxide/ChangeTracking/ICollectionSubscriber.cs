@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Reflection;
 
 using Epoxide.Collections;
 
@@ -54,6 +55,32 @@ public static class CollectionChange
             foreach ( var item in source )
                 collection.Add ( item );
         }
+    }
+
+    private static MethodInfo? bindCollectionsMethod;
+
+    public static IDisposable? BindCollections ( this ICollectionSubscriber subscriber, object collection, object? enumerable )
+    {
+        bindCollectionsMethod ??= new Func < ICollectionSubscriber, ICollection < object >, ICollection < object >, IDisposable? > ( BindCollections ).Method.GetGenericMethodDefinition ( );
+
+        var elementType     = ExprHelper.GetGenericInterfaceArguments ( collection.GetType ( ), typeof ( ICollection < > ) ) [ 0 ];
+        var bindCollections = bindCollectionsMethod.MakeGenericMethod ( elementType );
+
+        return (IDisposable?) bindCollections.Invoke ( null, new [ ] { subscriber, collection, enumerable } );
+    }
+
+    public static IDisposable? BindCollections < T > ( this ICollectionSubscriber subscriber, ICollection < T > collection, IEnumerable < T >? enumerable )
+    {
+        if ( enumerable == null )
+        {
+            collection.Clear ( );
+
+            return null;
+        }
+
+        collection.ReplicateChanges ( Enumerable.Repeat ( CollectionChange < T >.Invalidated ( ), 1 ), enumerable );
+
+        return subscriber.Subscribe ( enumerable, (o, e) => collection.ReplicateChanges ( Enumerable.Repeat ( e, 1 ), enumerable ) );
     }
 }
 
