@@ -1,6 +1,4 @@
-﻿using System.Linq.Expressions;
-
-using Epoxide.Disposables;
+﻿using Epoxide.Disposables;
 
 namespace Epoxide;
 
@@ -12,37 +10,33 @@ public interface IAwaitable
 // TODO: Add IAsyncEnumerable/IObservable support
 public static class Awaitable
 {
-    public static object? AsAwaitable < T, TResult > ( this Task < T > source, Expression expression, Func < T, TResult >? selector, CancellationToken cancellationToken )
+    public static object? AsAwaitable < T, TResult > ( this Task < T > source, IScheduler? scheduler, Func < T, TResult >? selector, CancellationToken cancellationToken )
     {
         if ( source == null )
             throw new ArgumentNullException ( nameof ( source ) );
 
-        return new AwaitableTask < T, TResult > ( source, expression, selector, cancellationToken );
+        return new AwaitableTask < T, TResult > ( source, scheduler, selector, cancellationToken );
     }
 }
 
-// TODO: Needs access to scheduler selector
 public class AwaitableTask < T, TResult > : IAwaitable
 {
-    public AwaitableTask ( Task < T > task, Expression selector, Func < T, TResult >? compiledSelector, CancellationToken cancellationToken )
+    public AwaitableTask ( Task < T > task, IScheduler? scheduler, Func < T, TResult >? selector, CancellationToken cancellationToken )
     {
         Task              = task;
+        Scheduler         = scheduler;
         Selector          = selector;
-        CompiledSelector  = compiledSelector;
         CancellationToken = cancellationToken;
     }
 
     public Task < T >           Task              { get; }
-    public Expression?          Selector          { get; }
-    public Func < T, TResult >? CompiledSelector  { get; }
+    public IScheduler?          Scheduler         { get; }
+    public Func < T, TResult >? Selector          { get; }
     public CancellationToken    CancellationToken { get; }
 
     public IDisposable Await < TState > ( TState state, Action < TState, object?, Exception? > callback )
     {
-        // TODO: Scheduling
-        var scheduler = (IScheduler?) null;
-
-        return scheduler != null ? AwaitWithScheduler    ( scheduler, state, callback ) :
+        return Scheduler != null ? AwaitWithScheduler    ( Scheduler, state, callback ) :
                                    AwaitWithoutScheduler ( state, callback );
     }
 
@@ -96,8 +90,8 @@ public class AwaitableTask < T, TResult > : IAwaitable
 
     private void SelectResult < TState > ( TState state, object? value, Action < TState, object?, Exception? > callback )
     {
-        if ( CompiledSelector is { } selector ) SelectResult ( (T) value, selector, state, callback );
-        else                                    callback     ( state, value, default );
+        if ( Selector is { } selector ) SelectResult ( (T) value, selector, state, callback );
+        else                            callback     ( state, value, default );
 
         static void SelectResult ( T source, Func < T, TResult > selector, TState state, Action < TState, object?, Exception? > callback )
         {

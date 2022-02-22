@@ -77,18 +77,26 @@ public interface IExpressionAccessor < TSource >
     IDisposable Write < TState > ( TSource source, TState state, object? value, ExpressionAccessCallback < TSource, TState, ExpressionWriteResult > callback );
 }
 
+public interface IExpressionTransformer
+{
+    Expression Transform ( Expression expression );
+}
+
 public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
 {
-    public ExpressionAccessor ( LambdaExpression expression )
+    public ExpressionAccessor ( LambdaExpression expression ) : this ( expression, Sentinel.Transformer ) { }
+    public ExpressionAccessor ( LambdaExpression expression, IExpressionTransformer transformer )
     {
         Expression   = expression ?? throw new ArgumentNullException ( nameof ( expression ) );
+        Transformer  = transformer;
         IsCollection = expression.Body.Type.GetGenericInterfaceArguments ( typeof ( ICollection < > ) ) != null;
         IsWritable   = expression.Body.IsWritable ( );
     }
 
-    public LambdaExpression Expression   { get; }
-    public bool             IsCollection { get; }
-    public bool             IsWritable   { get; }
+    public LambdaExpression       Expression   { get; }
+    public IExpressionTransformer Transformer  { get; }
+    public bool                   IsCollection { get; }
+    public bool                   IsWritable   { get; }
 
     public virtual IDisposable Read < TState > ( TSource source, TState state, ExpressionAccessCallback < TSource, TState, ExpressionReadResult > callback )
     {
@@ -102,7 +110,7 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
     public virtual IDisposable Write < TState > ( TSource source, TState state, object? value, ExpressionAccessCallback < TSource, TState, ExpressionWriteResult > callback )
     {
         if ( ! IsWritable )
-            throw NotWritable;
+            throw NotWritable ( );
 
         var token = new SerialDisposable ( );
 
@@ -201,13 +209,13 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
     protected Func < TSource, object? >  ReadValue => readValue ??= Compile ( Expression.Body, Expression.Parameters );
 
     private   Func < TSource, object? >? readTarget;
-    protected Func < TSource, object? >  ReadTarget   => readTarget ??= Compile ( Target.Expression, Expression.Parameters );
-    protected MemberExpression           Target       => IsWritable ? (MemberExpression) Expression.Body : throw NotWritable;
-    protected InvalidOperationException  NotWritable  => new InvalidOperationException ( $"Expression { Expression } is not writable." );
+    protected Func < TSource, object? >  ReadTarget      => readTarget ??= Compile ( Target.Expression, Expression.Parameters );
+    protected MemberExpression           Target          => IsWritable ? (MemberExpression) Expression.Body : throw NotWritable ( );
+    protected InvalidOperationException  NotWritable ( ) => new InvalidOperationException ( $"Expression { Expression } is not writable." );
 
-    protected static Func < TSource, object? > Compile ( Expression expression, IReadOnlyCollection < ParameterExpression > parameters )
+    protected Func < TSource, object? > Compile ( Expression expression, IReadOnlyCollection < ParameterExpression > parameters )
     {
-        expression = expression.AddSentinel ( );
+        expression = Transformer.Transform ( expression );
         if ( expression.Type != typeof ( object ) )
             expression = System.Linq.Expressions.Expression.Convert ( expression, typeof ( object ) );
 
@@ -217,7 +225,8 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
 
 public class ScheduledExpressionAccessor < TSource > : ExpressionAccessor < TSource >
 {
-    public ScheduledExpressionAccessor ( LambdaExpression expression, IScheduler scheduler ) : base ( expression )
+    public ScheduledExpressionAccessor ( IScheduler scheduler, LambdaExpression expression ) : this ( scheduler, expression, Sentinel.Transformer ) { }
+    public ScheduledExpressionAccessor ( IScheduler scheduler, LambdaExpression expression, IExpressionTransformer transformer ) : base ( expression, transformer )
     {
         Scheduler = scheduler;
     }
@@ -236,7 +245,7 @@ public class ScheduledExpressionAccessor < TSource > : ExpressionAccessor < TSou
     public override IDisposable Write < TState > ( TSource source, TState state, object? value, ExpressionAccessCallback < TSource, TState, ExpressionWriteResult > callback )
     {
         if ( ! IsWritable )
-            throw NotWritable;
+            throw NotWritable ( );
 
         var token = new SerialDisposable ( );
 

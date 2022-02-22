@@ -128,8 +128,8 @@ public sealed class Trigger < TSource >
 
             Triggers.Add ( new Trigger < TSource >
             {
-                Accessor = Services.SchedulerSelector.SelectScheduler  ( expression ) is { } scheduler ?
-                           new ScheduledExpressionAccessor < TSource > ( expression, scheduler ) :
+                Accessor = Services.SchedulerSelector.SelectScheduler ( expression ) is { } scheduler ?
+                           new ScheduledExpressionAccessor < TSource > ( scheduler, expression ) :
                            new ExpressionAccessor          < TSource > ( expression ),
                 Member   = node.Member
             } );
@@ -146,7 +146,7 @@ public sealed class Trigger < TSource >
         //
         //    Triggers.Add ( new Trigger < TSource >
         //    {
-        //        Accessor = Services.SchedulerSelector.SelectScheduler  ( expression ) is { } scheduler ?
+        //        Accessor = Services.SchedulerSelector.SelectScheduler ( expression ) is { } scheduler ?
         //                   new ScheduledExpressionAccessor < TSource > ( expression, scheduler ) :
         //                   new ExpressionAccessor          < TSource > ( expression ),
         //        Member   = node.Method

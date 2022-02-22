@@ -73,7 +73,7 @@ public static class BinderExtensions
         if ( expression.NodeType == ExpressionType.MemberAccess )
         {
             var m = (MemberExpression) expression;
-            var x = m.Expression.AddSentinel ( );
+            var x = Sentinel.Transformer.Transform ( m.Expression );
             if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != Sentinel.Value )
                 services.MemberSubscriber.Invalidate ( obj, m.Member );
         }
@@ -217,7 +217,7 @@ public class NoSchedulerSelector : ISchedulerSelector
 }
 
 // TODO: Handle exceptions
-public sealed class Binding < TSource > : IBinding < TSource >
+public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTransformer
 {
     private readonly CompositeDisposable disposables;
 
@@ -231,21 +231,8 @@ public sealed class Binding < TSource > : IBinding < TSource >
 
         Services = services;
 
-        var binding = Expression.Constant ( this );
-
-        var leftBody = new EnumerableToCollectionVisitor         ( right.Body.Type ).Visit ( left.Body );
-            leftBody = new EnumerableToBindableEnumerableVisitor ( binding )        .Visit ( leftBody );
-            leftBody = new AggregateInvalidatorVisitor           ( )                .Visit ( leftBody );
-
-        var rightBody = new EnumerableToCollectionVisitor         ( left.Body.Type ).Visit ( right.Body );
-            rightBody = new EnumerableToBindableEnumerableVisitor ( binding )       .Visit ( rightBody );
-            rightBody = new AggregateInvalidatorVisitor           ( )               .Visit ( rightBody );
-
-        if ( left .Body != leftBody  ) left  = Expression.Lambda ( leftBody,  left .Parameters );
-        if ( right.Body != rightBody ) right = Expression.Lambda ( rightBody, right.Parameters );
-
-        leftSide  = new Side ( services, left,  ReadThenWriteToOtherSide );
-        rightSide = new Side ( services, right, ReadThenWriteToOtherSide );
+        leftSide  = new Side ( this, left,  ReadThenWriteToOtherSide );
+        rightSide = new Side ( this, right, ReadThenWriteToOtherSide );
 
         leftSide .OtherSide = rightSide;
         rightSide.OtherSide = leftSide;
@@ -269,18 +256,33 @@ public sealed class Binding < TSource > : IBinding < TSource >
         else
         {
             // TODO: BindingException + nicer Expression.ToString ( )
-            if ( leftBody.NodeType == ExpressionType.Convert && leftBody.Type == rightBody.Type && ( (UnaryExpression) leftBody ).Operand.IsWritable ( ) )
-                throw new ArgumentException ( $"Cannot assign { leftBody.Type } to { ( (UnaryExpression) leftBody ).Operand.Type }" );
-            else if ( rightBody.NodeType == ExpressionType.Convert && rightBody.Type == leftBody.Type && ( (UnaryExpression) rightBody ).Operand.IsWritable ( ) )
-                throw new ArgumentException ( $"Cannot assign { rightBody.Type } to { ( (UnaryExpression) rightBody ).Operand.Type }" );
+            if ( left.Body.NodeType == ExpressionType.Convert && left.Body.Type == right.Body.Type && ( (UnaryExpression) left.Body ).Operand.IsWritable ( ) )
+                throw new ArgumentException ( $"Cannot assign { left.Body.Type } to { ( (UnaryExpression) left.Body ).Operand.Type }" );
+            else if ( right.Body.NodeType == ExpressionType.Convert && right.Body.Type == left.Body.Type && ( (UnaryExpression) right.Body ).Operand.IsWritable ( ) )
+                throw new ArgumentException ( $"Cannot assign { right.Body.Type } to { ( (UnaryExpression) right.Body ).Operand.Type }" );
             
-            throw new ArgumentException ( $"Neither side is writable { leftBody } == { rightBody }" );
+            throw new ArgumentException ( $"Neither side is writable { left.Body } == { right.Body }" );
         }
 
         disposables.Add ( leftSide .Container    );
         disposables.Add ( leftSide .Subscription );
         disposables.Add ( rightSide.Container    );
         disposables.Add ( rightSide.Subscription );
+    }
+
+    Expression IExpressionTransformer.Transform ( Expression expression )
+    {
+        var binding       = Expression.Constant ( this );
+        var otherSideType = expression == rightSide.Accessor.Expression.Body ? leftSide .Accessor.Expression.Body.Type :
+                                                                               rightSide.Accessor.Expression.Body.Type;
+
+        expression = new EnumerableToCollectionVisitor         ( otherSideType ).Visit ( expression );
+        expression = new EnumerableToBindableEnumerableVisitor ( binding )      .Visit ( expression );
+        expression = new AggregateInvalidatorVisitor           ( )              .Visit ( expression );
+        expression = Sentinel.Transformer.Transform                                    ( expression );
+        expression = new BinderServicesReplacer                ( binding )      .Visit ( expression );
+
+        return expression;
     }
 
     public IBinderServices Services { get; }
@@ -398,14 +400,14 @@ public sealed class Binding < TSource > : IBinding < TSource >
 
     private class Side
     {
-        public Side ( IBinderServices services, LambdaExpression expression, Action < Side > callback )
+        public Side ( Binding < TSource > binding, LambdaExpression expression, Action < Side > callback )
         {
-            Accessor     = services.SchedulerSelector.SelectScheduler  ( expression ) is { } scheduler ?
-                           new ScheduledExpressionAccessor < TSource > ( expression, scheduler ) :
-                           new ExpressionAccessor          < TSource > ( expression );
+            Accessor     = binding.Services.SchedulerSelector.SelectScheduler ( expression ) is { } scheduler ?
+                           new ScheduledExpressionAccessor < TSource > ( scheduler, expression, binding ) :
+                           new ExpressionAccessor          < TSource > ( expression, binding );
             Callback     = callback;
             Container    = new CompositeDisposable ( );
-            Subscription = new ExpressionSubscription < TSource > ( services, expression, (e, s, o, m) => Callback ( this ) );
+            Subscription = new ExpressionSubscription < TSource > ( binding.Services, expression, (e, s, o, m) => Callback ( this ) );
         }
 
         public ExpressionAccessor < TSource >     Accessor     { get; }
@@ -417,7 +419,7 @@ public sealed class Binding < TSource > : IBinding < TSource >
 }
 
 // TODO: Handle exceptions
-public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >
+public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >, IExpressionTransformer
 {
     readonly CompositeDisposable disposables;
 
@@ -431,19 +433,23 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >
         Event             = eventInfo;
         SubscribedBinding = subscribedBinding;
 
-        var binding = Expression.Constant ( this );
-
-        var eventSourceBody = new EnumerableToBindableEnumerableVisitor ( binding ).Visit ( eventSource.Body );
-            eventSourceBody = new AggregateInvalidatorVisitor           ( )        .Visit ( eventSourceBody );
-
-        if ( eventSource.Body != eventSourceBody )
-            eventSource = Expression.Lambda ( eventSourceBody, eventSource.Parameters );
-
-        eventSourceSide = new Side ( services, eventSource, ReadThenSubscribeToEvent );
+        eventSourceSide = new Side ( this, eventSource, ReadThenSubscribeToEvent );
 
         disposables.Add ( eventSourceSide.Container    );
         disposables.Add ( eventSourceSide.Subscription );
         disposables.Add ( subscribedBinding );
+    }
+
+    Expression IExpressionTransformer.Transform ( Expression expression )
+    {
+        var binding = Expression.Constant ( this );
+
+        expression = new EnumerableToBindableEnumerableVisitor ( binding ).Visit ( expression );
+        expression = new AggregateInvalidatorVisitor           ( )        .Visit ( expression );
+        expression = Sentinel.Transformer.Transform                              ( expression );
+        expression = new BinderServicesReplacer                ( binding ).Visit ( expression );
+
+        return expression;
     }
 
     public IBinderServices    Services          { get; }
@@ -531,14 +537,14 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >
 
     private class Side
     {
-        public Side ( IBinderServices services, LambdaExpression expression, Action < Side > callback )
+        public Side ( EventBinding < TSource, TArgs > binding, LambdaExpression expression, Action < Side > callback )
         {
-            Accessor     = services.SchedulerSelector.SelectScheduler  ( expression ) is { } scheduler ?
-                           new ScheduledExpressionAccessor < TSource > ( expression, scheduler ) :
-                           new ExpressionAccessor          < TSource > ( expression );
+            Accessor     = binding.Services.SchedulerSelector.SelectScheduler ( expression ) is { } scheduler ?
+                           new ScheduledExpressionAccessor < TSource > ( scheduler, expression, binding ) :
+                           new ExpressionAccessor          < TSource > ( expression, binding );
             Callback     = callback;
             Container    = new CompositeDisposable ( );
-            Subscription = new ExpressionSubscription < TSource > ( services, expression, (e, s, o, m) => Callback ( this ) );
+            Subscription = new ExpressionSubscription < TSource > ( binding.Services, expression, (e, s, o, m) => Callback ( this ) );
         }
 
         public ExpressionAccessor < TSource >     Accessor     { get; }

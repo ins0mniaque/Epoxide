@@ -9,31 +9,38 @@ namespace Epoxide;
 
 public static class Sentinel
 {
+    public static Expression             Services    { get; } = ( (Expression < Func < IBinderServices > >) ( ( ) => Binder.Default.Services ) ).Body;
+    public static IExpressionTransformer Transformer { get; } = new SentinelExpressionTransformer ( );
+
+    // TODO: Rename...
     public static object Value { get; } = new SentinelObject ( );
-
-    public static Expression AddSentinel ( this Expression node )
-    {
-        node = bindableTaskVisitor   .Visit ( node );
-        node = nullPropagationVisitor.Visit ( node );
-
-        if ( node.NodeType == ExpressionType.Coalesce && ( (BinaryExpression) node ).Right is ConstantExpression )
-            return node;
-
-        if ( ! node.IsNullable ( ) || node.NodeType == ExpressionType.MemberAccess && ( (MemberExpression) node ).Expression.IsClosure ( ) )
-            return node;
-
-        if ( node.Type != typeof ( object ) )
-            node = Expression.Convert ( node, typeof ( object ) );
-
-        return Expression.Coalesce ( node, Expression.Constant ( Value ) );
-    }
-
-    private static readonly NullPropagationVisitor          nullPropagationVisitor = new ( );
-    private static readonly TaskResultToBindableTaskVisitor bindableTaskVisitor    = new ( );
 
     private class SentinelObject
     {
         public override string ToString ( ) => '{' + nameof ( Sentinel ) + '}';
+    }
+}
+
+public class SentinelExpressionTransformer : IExpressionTransformer
+{
+    private static readonly NullPropagationVisitor       nullPropagationVisitor = new ( );
+    private static readonly TaskResultToAwaitableVisitor awaitableTaskVisitor   = new ( );
+
+    public Expression Transform ( Expression expression )
+    {
+        expression = awaitableTaskVisitor  .Visit ( expression );
+        expression = nullPropagationVisitor.Visit ( expression );
+
+        if ( expression.NodeType == ExpressionType.Coalesce && ( (BinaryExpression) expression ).Right is ConstantExpression )
+            return expression;
+
+        if ( ! expression.IsNullable ( ) || expression.NodeType == ExpressionType.MemberAccess && ( (MemberExpression) expression ).Expression.IsClosure ( ) )
+            return expression;
+
+        if ( expression.Type != typeof ( object ) )
+            expression = Expression.Convert ( expression, typeof ( object ) );
+
+        return Expression.Coalesce ( expression, Expression.Constant ( Sentinel.Value ) );
     }
 }
 
@@ -336,9 +343,56 @@ public class AggregateInvalidatorVisitor : ExpressionVisitor
     }
 }
 
-public class TaskResultToBindableTaskVisitor : ExpressionVisitor
+public class BinderServicesReplacer : ExpressionVisitor
+{
+    private static PropertyInfo? services;
+
+    public BinderServicesReplacer ( ) { }
+    public BinderServicesReplacer ( Expression binding )
+    {
+        Binding = binding;
+    }
+
+    private Expression? Binding { get; }
+
+    public override Expression Visit ( Expression node )
+    {
+        if ( node == Sentinel.Services )
+        {
+            services ??= typeof ( IBinding ).GetProperty ( nameof ( IBinding.Services ) );
+
+            return Expression.MakeMemberAccess ( Binding, services );
+        }
+
+        return base.Visit ( node );
+    }
+}
+
+public class BinderServicesReplacerVisitor : ExpressionVisitor
+{
+    private static MethodInfo? invalidates;
+
+    protected override Expression VisitMethodCall ( MethodCallExpression node )
+    {
+        if ( node.Method.DeclaringType == typeof ( BindableEnumerable ) && node.Method.Name == nameof ( BindableEnumerable.AsBindable ) )
+        {
+            invalidates ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.Invalidates ) );
+
+            return Expression.Call ( invalidates.MakeGenericMethod ( node.Method.GetGenericArguments ( ) ), node, Expression.Constant ( node.Arguments [ 0 ] ) );
+        }
+
+        if ( node.Method.DeclaringType != typeof ( BindableEnumerable ) || node.Method.ReturnType.GetGenericInterfaceArguments ( typeof ( IBindableEnumerable < > ) ) != null )
+            return node;
+
+        return base.VisitMethodCall ( node );
+    }
+}
+
+public class TaskResultToAwaitableVisitor : ExpressionVisitor
 {
     private static MethodInfo? await;
+    private static MethodInfo? selectScheduler;
+    private static Expression? schedulerSelector;
 
     public override Expression Visit ( Expression node )
     {
@@ -346,13 +400,17 @@ public class TaskResultToBindableTaskVisitor : ExpressionVisitor
 
         if ( splitter.TrySplit ( node, out var left, out var right ) )
         {
-            await ??= typeof ( Awaitable ).GetMethod ( nameof ( Awaitable.AsAwaitable ) );
+            await             ??= typeof ( Awaitable )         .GetMethod ( nameof ( Awaitable.AsAwaitable ) );
+            selectScheduler   ??= typeof ( ISchedulerSelector ).GetMethod ( nameof ( ISchedulerSelector.SelectScheduler ) );
+            schedulerSelector ??= Expression.MakeMemberAccess ( Sentinel.Services,
+                                                                typeof ( IBinderServices ).GetProperty ( nameof ( IBinderServices.SchedulerSelector ) ) );
 
-            var task = ( (MemberExpression) left ).Expression;
+            var task      = ( (MemberExpression) left ).Expression;
+            var scheduler = Expression.Call ( schedulerSelector, selectScheduler, Expression.Constant ( right.Body ) );
 
             return Expression.Call ( await.MakeGenericMethod ( left.Type, right.Body.Type ),
                                      task,
-                                     Expression.Constant ( right.Body ),
+                                     scheduler,
                                      right,
                                      GetCancellationToken ( task ) );
         }
