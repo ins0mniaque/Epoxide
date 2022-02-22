@@ -1,10 +1,12 @@
-﻿using Epoxide.Disposables;
+﻿using System.Runtime.ExceptionServices;
+
+using Epoxide.Disposables;
 
 namespace Epoxide;
 
 public interface IAwaitable
 {
-    IDisposable Await < TState > ( TState state, Action < TState, object?, Exception? > callback );
+    IDisposable Await < TState > ( TState state, Action < TState, object?, ExceptionDispatchInfo? > callback );
 }
 
 // TODO: Add IAsyncEnumerable/IObservable support
@@ -34,13 +36,13 @@ public class AwaitableTask < T, TResult > : IAwaitable
     public Func < T, TResult >? Selector          { get; }
     public CancellationToken    CancellationToken { get; }
 
-    public IDisposable Await < TState > ( TState state, Action < TState, object?, Exception? > callback )
+    public IDisposable Await < TState > ( TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
     {
         return Scheduler != null ? AwaitWithScheduler    ( Scheduler, state, callback ) :
                                    AwaitWithoutScheduler ( state, callback );
     }
 
-    private IDisposable AwaitWithScheduler < TState > ( IScheduler scheduler, TState state, Action < TState, object?, Exception? > callback )
+    private IDisposable AwaitWithScheduler < TState > ( IScheduler scheduler, TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
     {
         var token = new SerialDisposable ( );
 
@@ -53,7 +55,7 @@ public class AwaitableTask < T, TResult > : IAwaitable
         return token;
     }
 
-    private IDisposable AwaitWithoutScheduler < TState > ( TState state, Action < TState, object?, Exception? > callback )
+    private IDisposable AwaitWithoutScheduler < TState > ( TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
     {
         return AwaitTask ( state, (state, value, exception) =>
         {
@@ -62,11 +64,11 @@ public class AwaitableTask < T, TResult > : IAwaitable
         } );
     }
 
-    private IDisposable AwaitTask < TState > ( TState state, Action < TState, object?, Exception? > callback )
+    private IDisposable AwaitTask < TState > ( TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
     {
         if ( Task.IsCompleted )
         {
-            if      (   Task.IsFaulted  ) callback ( state, default, Task.Exception );
+            if      (   Task.IsFaulted  ) callback ( state, default, ExceptionDispatchInfo.Capture ( Task.Exception ) );
             else if ( ! Task.IsCanceled ) callback ( state, Task.Result, default );
 
             return Disposable.Empty;
@@ -80,24 +82,24 @@ public class AwaitableTask < T, TResult > : IAwaitable
 
         return cancellation;
 
-        async static void AwaitTask ( Task < T > task, TState state, Action < TState, object?, Exception? > callback )
+        async static void AwaitTask ( Task < T > task, TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
         {
             try                                  { callback ( state, await task.ConfigureAwait ( false ), default ); }
             catch ( OperationCanceledException ) { }
-            catch ( Exception exception )        { callback ( state, default, exception ); }
+            catch ( Exception exception )        { callback ( state, default, ExceptionDispatchInfo.Capture ( exception ) ); }
         }
     }
 
-    private void SelectResult < TState > ( TState state, object? value, Action < TState, object?, Exception? > callback )
+    private void SelectResult < TState > ( TState state, object? value, Action < TState, object?, ExceptionDispatchInfo? > callback )
     {
         if ( Selector is { } selector ) SelectResult ( (T) value, selector, state, callback );
         else                            callback     ( state, value, default );
 
-        static void SelectResult ( T source, Func < T, TResult > selector, TState state, Action < TState, object?, Exception? > callback )
+        static void SelectResult ( T source, Func < T, TResult > selector, TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
         {
             try                                  { callback ( state, selector ( source ), default ); }
             catch ( OperationCanceledException ) { }
-            catch ( Exception exception )        { callback ( state, default, exception ); }
+            catch ( Exception exception )        { callback ( state, default, ExceptionDispatchInfo.Capture ( exception ) ); }
         }
     }
 }

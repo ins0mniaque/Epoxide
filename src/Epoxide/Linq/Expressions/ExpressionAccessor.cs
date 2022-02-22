@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 
 using Epoxide.Disposables;
 
@@ -11,32 +12,31 @@ public abstract class ExpressionAccessResult
 {
     protected ExpressionAccessResult ( IDisposable token, bool succeeded )
     {
-        Token = token;
+        Token     = token;
         Succeeded = succeeded;
     }
 
-    protected ExpressionAccessResult ( IDisposable token, Exception exception )
+    protected ExpressionAccessResult ( IDisposable token, ExceptionDispatchInfo exception )
     {
-        Token = token;
+        Token     = token;
         Exception = exception;
     }
 
-    public IDisposable Token { get; }
-    public Exception? Exception { get; }
-
-    public bool Succeeded { get; }
-    public bool Faulted   => Exception != null;
+    public IDisposable            Token     { get; }
+    public ExceptionDispatchInfo? Exception { get; }
+    public bool                   Succeeded { get; }
+    public bool                   Faulted   => Exception != null;
 }
 
 public sealed class ExpressionReadResult : ExpressionAccessResult
 {
-    public static ExpressionReadResult Failure ( IDisposable token )                      => new ExpressionReadResult ( token );
-    public static ExpressionReadResult Fault   ( IDisposable token, Exception exception ) => new ExpressionReadResult ( token, exception );
-    public static ExpressionReadResult Success ( IDisposable token, object?   value     ) => new ExpressionReadResult ( token, value );
+    public static ExpressionReadResult Failure ( IDisposable token )                                  => new ExpressionReadResult ( token );
+    public static ExpressionReadResult Fault   ( IDisposable token, ExceptionDispatchInfo exception ) => new ExpressionReadResult ( token, exception );
+    public static ExpressionReadResult Success ( IDisposable token, object?               value     ) => new ExpressionReadResult ( token, value );
 
-    private ExpressionReadResult ( IDisposable token )                      : base ( token, false     ) { }
-    private ExpressionReadResult ( IDisposable token, Exception exception ) : base ( token, exception ) { }
-    private ExpressionReadResult ( IDisposable token, object?   value     ) : base ( token, true      )
+    private ExpressionReadResult ( IDisposable token )                                  : base ( token, false     ) { }
+    private ExpressionReadResult ( IDisposable token, ExceptionDispatchInfo exception ) : base ( token, exception ) { }
+    private ExpressionReadResult ( IDisposable token, object?               value     ) : base ( token, true      )
     {
         Value = value;
     }
@@ -46,15 +46,15 @@ public sealed class ExpressionReadResult : ExpressionAccessResult
 
 public sealed class ExpressionWriteResult : ExpressionAccessResult
 {
-    public static ExpressionWriteResult Failure ( IDisposable token )                      => new ExpressionWriteResult ( token );
-    public static ExpressionWriteResult Fault   ( IDisposable token, Exception exception ) => new ExpressionWriteResult ( token, exception );
+    public static ExpressionWriteResult Failure ( IDisposable token )                                  => new ExpressionWriteResult ( token );
+    public static ExpressionWriteResult Fault   ( IDisposable token, ExceptionDispatchInfo exception ) => new ExpressionWriteResult ( token, exception );
     public static ExpressionWriteResult Success ( IDisposable token, object target, MemberInfo member, object? value )
     {
         return new ExpressionWriteResult ( token, target, member, value );
     }
 
-    private ExpressionWriteResult ( IDisposable token )                      : base ( token, false     ) { }
-    private ExpressionWriteResult ( IDisposable token, Exception exception ) : base ( token, exception ) { }
+    private ExpressionWriteResult ( IDisposable token )                                  : base ( token, false     ) { }
+    private ExpressionWriteResult ( IDisposable token, ExceptionDispatchInfo exception ) : base ( token, exception ) { }
     private ExpressionWriteResult ( IDisposable token, object target, MemberInfo member, object? value ) : base ( token, true )
     {
         Target = target;
@@ -179,23 +179,23 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
         return token;
     }
 
-    protected object? TryReadValue ( TSource source, out Exception? exception )
+    protected object? TryReadValue ( TSource source, out ExceptionDispatchInfo? exception )
     {
         try                   { exception = null; return ReadValue ( source ); }
-        catch ( Exception e ) { exception = e;    return null; }
+        catch ( Exception e ) { exception = ExceptionDispatchInfo.Capture ( e ); return null; }
     }
 
-    protected object? TryReadTarget ( TSource source, out Exception? exception )
+    protected object? TryReadTarget ( TSource source, out ExceptionDispatchInfo? exception )
     {
         try                   { exception = null; return ReadTarget ( source ); }
-        catch ( Exception e ) { exception = e;    return null; }
+        catch ( Exception e ) { exception = ExceptionDispatchInfo.Capture ( e ); return null; }
     }
 
     // TODO: Emit code to set value
-    protected void TryWrite ( object target, object? value, out Exception? exception )
+    protected void TryWrite ( object target, object? value, out ExceptionDispatchInfo? exception )
     {
         try                   { exception = null; Target.Member.SetValue ( target, value ); }
-        catch ( Exception e ) { exception = e; }
+        catch ( Exception e ) { exception = ExceptionDispatchInfo.Capture ( e ); }
     }
 
     protected static SerialDisposable Disconnected ( SerialDisposable token )

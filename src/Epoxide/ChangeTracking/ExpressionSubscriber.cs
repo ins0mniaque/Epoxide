@@ -30,8 +30,6 @@ public sealed class ExpressionSubscriber < TSource >
     }
 }
 
-// TODO: Handle exceptions
-// TODO: Clean up callback
 public sealed class ExpressionSubscription < TSource > : IDisposable
 {
     readonly IBinderServices services;
@@ -72,6 +70,12 @@ public sealed class ExpressionSubscription < TSource > : IDisposable
     private void ReadAndSubscribe ( TSource source, Trigger < TSource > t, ExpressionReadResult result )
     {
         t.Access = null;
+
+        if ( result.Faulted )
+        {
+            services.UnhandledExceptionHandler.Catch ( result.Exception );
+            return;
+        }
 
         if ( result.Succeeded && result.Value != null )
             t.Subscription = services.MemberSubscriber.Subscribe ( result.Value, t.Member, (o, m) => callback ( t.Accessor.Expression, Source, o, m ) );

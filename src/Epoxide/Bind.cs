@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 
 using Epoxide.ChangeTracking;
 using Epoxide.Disposables;
@@ -7,32 +8,79 @@ using Epoxide.Linq.Expressions;
 
 namespace Epoxide;
 
+public interface IExceptionHandler
+{
+    // TODO: Add context
+    void Catch ( ExceptionDispatchInfo exception );
+}
+
+public class RethrowExceptionHandler : IExceptionHandler
+{
+    public void Catch ( ExceptionDispatchInfo exception ) => exception.Throw ( );
+}
+
 public interface IBinderServices
 {
-    IMemberSubscriber     MemberSubscriber     { get; }
-    ICollectionSubscriber CollectionSubscriber { get; }
-    ISchedulerSelector    SchedulerSelector    { get; }
+    IMemberSubscriber     MemberSubscriber          { get; }
+    ICollectionSubscriber CollectionSubscriber      { get; }
+    ISchedulerSelector    SchedulerSelector         { get; }
+    IExceptionHandler     UnhandledExceptionHandler { get; }
+}
+
+public class BindingServices : IBinderServices
+{
+    public BindingServices ( IMemberSubscriber     memberSubscriber,
+                             ICollectionSubscriber collectionSubscriber,
+                             ISchedulerSelector    schedulerSelector,
+                             IExceptionHandler     unhandledExceptionHandler )
+    {
+        MemberSubscriber          = memberSubscriber;
+        CollectionSubscriber      = collectionSubscriber;
+        SchedulerSelector         = schedulerSelector;
+        UnhandledExceptionHandler = unhandledExceptionHandler;
+    }
+
+    public IMemberSubscriber     MemberSubscriber          { get; }
+    public ICollectionSubscriber CollectionSubscriber      { get; }
+    public ISchedulerSelector    SchedulerSelector         { get; }
+    public IExceptionHandler     UnhandledExceptionHandler { get; }
 }
 
 public class DefaultBindingServices : IBinderServices
 {
-    public IMemberSubscriber     MemberSubscriber     { get; } = new MemberSubscriber     ( new MemberSubscriptionFactory     ( ) );
-    public ICollectionSubscriber CollectionSubscriber { get; } = new CollectionSubscriber ( new CollectionSubscriptionFactory ( ) );
-    public ISchedulerSelector    SchedulerSelector    { get; } = new NoSchedulerSelector ( );
+    public IMemberSubscriber     MemberSubscriber          { get; } = new MemberSubscriber     ( new MemberSubscriptionFactory     ( ) );
+    public ICollectionSubscriber CollectionSubscriber      { get; } = new CollectionSubscriber ( new CollectionSubscriptionFactory ( ) );
+    public ISchedulerSelector    SchedulerSelector         { get; } = new NoSchedulerSelector  ( );
+    public IExceptionHandler     UnhandledExceptionHandler { get; } = new RethrowExceptionHandler   ( );
 }
 
 public interface IBinder
 {
     IBinderServices Services { get; }
 
-    IBinding < TSource > Bind < TSource > ( TSource source, Expression < Func < TSource, bool > > specifications );
+    IBinding < TSource > Bind < TSource > ( IBinderServices services, TSource source, Expression < Func < TSource, bool > > specifications );
 }
 
 public static class BinderExtensions
 {
+    public static IBinding Bind < T > ( this IBinder binder, T source, Expression < Func < T, bool > > specifications )
+    {
+        return binder.Bind ( binder.Services, source, specifications );
+    }
+
+    public static IBinding Bind < T > ( this IBinder binder, T source, Expression < Func < T, bool > > specifications, IExceptionHandler unhandledExceptionHandler )
+    {
+        var services = new BindingServices ( binder.Services.MemberSubscriber,
+                                             binder.Services.CollectionSubscriber,
+                                             binder.Services.SchedulerSelector,
+                                             unhandledExceptionHandler );
+
+        return binder.Bind ( services, source, specifications );
+    }
+
     public static IBinding Bind ( this IBinder binder, Expression < Func < bool > > specifications )
     {
-        return binder.Bind ( null, Expression.Lambda < Func < object?, bool > > ( specifications.Body, CachedExpressionCompiler.UnusedParameter ) );
+        return binder.Bind ( binder.Services, null, Expression.Lambda < Func < object?, bool > > ( specifications.Body, CachedExpressionCompiler.UnusedParameter ) );
     }
 
     public static IBinding Bind ( this IBinder binder, Expression < Func < bool > > specifications, params IDisposable [ ] disposables )
@@ -84,8 +132,8 @@ public static class BinderExtensions
 
 public class Binder : IBinder
 {
-    private static Binder? defaultBinder;
-    public  static Binder  Default
+    private static IBinder? defaultBinder;
+    public  static IBinder  Default
     {
         get => defaultBinder ??= new Binder ( );
         set => defaultBinder = value;
@@ -99,9 +147,9 @@ public class Binder : IBinder
 
     public IBinderServices Services { get; }
 
-    public IBinding < TSource > Bind < TSource > ( TSource source, Expression < Func < TSource, bool > > specifications )
+    public IBinding < TSource > Bind < TSource > ( IBinderServices services, TSource source, Expression < Func < TSource, bool > > specifications )
     {
-        var binding = Parse ( source, specifications );
+        var binding = Parse ( services, source, specifications );
 
         binding.Bind ( );
 
@@ -110,7 +158,7 @@ public class Binder : IBinder
 
     private static MethodInfo? parse;
 
-    IBinding < TSource > Parse < TSource > ( TSource source, LambdaExpression lambda )
+    private static IBinding < TSource > Parse < TSource > ( IBinderServices services, TSource source, LambdaExpression lambda )
     {
         var expr = lambda.Body;
 
@@ -131,15 +179,15 @@ public class Binder : IBinder
                 if ( eventLambda.Parameters.Count == 0 )
                     eventLambda = Expression.Lambda ( eventLambda.Body, Expression.Parameter ( eventArgsType, "e" ) );
 
-                parse ??= new Func < TSource, LambdaExpression, IBinding < TSource > > ( Parse ).Method.GetGenericMethodDefinition ( );
+                parse ??= new Func < IBinderServices, TSource, LambdaExpression, IBinding < TSource > > ( Parse ).Method.GetGenericMethodDefinition ( );
 
-                var eventBinding     = parse.MakeGenericMethod ( eventArgsType ).Invoke ( this, new [ ] { Activator.CreateInstance ( eventArgsType ), eventLambda } );
+                var eventBinding     = parse.MakeGenericMethod ( eventArgsType ).Invoke ( null, new [ ] { services, Activator.CreateInstance ( eventArgsType ), eventLambda } );
                 var eventBindingType = typeof ( EventBinding < , > ).MakeGenericType ( typeof ( TSource ), eventArgsType );
 
                 // TODO: Create static method to cache reflection
                 var eventBindingCtor = eventBindingType.GetConstructor ( new [ ] { typeof ( IBinderServices ), typeof ( LambdaExpression ), typeof ( EventInfo ), typeof ( IBinding < > ).MakeGenericType ( eventArgsType ) } );
 
-                return (IBinding < TSource >) eventBindingCtor.Invoke ( new object [ ] { Services, eventSource, eventInfo, eventBinding } );
+                return (IBinding < TSource >) eventBindingCtor.Invoke ( new object [ ] { services, eventSource, eventInfo, eventBinding } );
             }
         }
 
@@ -166,7 +214,7 @@ public class Binder : IBinder
 
             parts.Reverse ( );
 
-            return new CompositeBinding < TSource > ( Services, parts.Select ( part => Parse ( source, Expression.Lambda ( part, lambda.Parameters ) ) ) ) { Source = source };
+            return new CompositeBinding < TSource > ( services, parts.Select ( part => Parse ( services, source, Expression.Lambda ( part, lambda.Parameters ) ) ) ) { Source = source };
         }
 
         if ( expr.NodeType == ExpressionType.Equal )
@@ -176,7 +224,7 @@ public class Binder : IBinder
             var left  = Expression.Lambda ( b.Left,  lambda.Parameters );
             var right = Expression.Lambda ( b.Right, lambda.Parameters );
 
-            return new Binding < TSource > ( Services, left, right ) { Source = source };
+            return new Binding < TSource > ( services, left, right ) { Source = source };
         }
 
         throw new FormatException ( $"Invalid binding format: { expr }" );
@@ -216,7 +264,6 @@ public class NoSchedulerSelector : ISchedulerSelector
     public IScheduler? SelectScheduler ( Expression expression ) => null;
 }
 
-// TODO: Handle exceptions
 public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTransformer
 {
     private readonly CompositeDisposable disposables;
@@ -320,6 +367,12 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
     {
         AfterAccess ( side, result.Token );
 
+        if ( result.Faulted )
+        {
+            Services.UnhandledExceptionHandler.Catch ( result.Exception );
+            return;
+        }
+
         if ( ! result.Succeeded )
             return;
 
@@ -332,7 +385,9 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
         {
             AfterAccess ( otherSide, result.Token );
 
-            if ( result.Succeeded && ! Equals ( Value, Value = result.Value ) )
+            if ( result.Faulted )
+                Services.UnhandledExceptionHandler.Catch ( result.Exception );
+            else if ( result.Succeeded && ! Equals ( Value, Value = result.Value ) )
                 Services.MemberSubscriber.Invalidate ( otherSide.Accessor.Expression, result.Member );
         }
     }
@@ -352,6 +407,12 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
     {
         AfterAccess ( side, result.Token );
 
+        if ( result.Faulted )
+        {
+            Services.UnhandledExceptionHandler.Catch ( result.Exception );
+            return;
+        }
+
         if ( ! result.Succeeded || result.Value == null )
             return;
 
@@ -365,7 +426,9 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
         {
             AfterAccess ( otherSide, result.Token );
 
-            if ( result.Succeeded && Services.CollectionSubscriber.BindCollections ( Value = collection, result.Value ) is { } binding )
+            if ( result.Faulted )
+                Services.UnhandledExceptionHandler.Catch ( result.Exception );
+            else if ( result.Succeeded && Services.CollectionSubscriber.BindCollections ( Value = collection, result.Value ) is { } binding )
                 otherSide.Container.Add ( binding );
         }
     }
@@ -418,7 +481,6 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
     }
 }
 
-// TODO: Handle exceptions
 public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >, IExpressionTransformer
 {
     readonly CompositeDisposable disposables;
@@ -487,6 +549,12 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >, IExp
     private void SubscribeToEvent ( TSource source, Side side, ExpressionReadResult result )
     {
         AfterAccess ( side, result.Token );
+
+        if ( result.Faulted )
+        {
+            Services.UnhandledExceptionHandler.Catch ( result.Exception );
+            return;
+        }
 
         if ( ! result.Succeeded || result.Value == null )
             return;
