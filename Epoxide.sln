@@ -27,6 +27,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		README.md = README.md
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{2F987568-2137-4E91-BFAA-B2B464FEEBE1}"
+	ProjectSection(SolutionItems) = preProject
+		samples\Directory.Build.props = samples\Directory.Build.props
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Epoxide.Terminal.Gui.Sample", "samples\Epoxide.Terminal.Gui.Sample\Epoxide.Terminal.Gui.Sample.csproj", "{80B67E37-8540-4DA6-8F21-6A18F76FCE8B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +48,10 @@ Global
 		{A4265E38-F078-4580-BA90-15E46168BCD6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A4265E38-F078-4580-BA90-15E46168BCD6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A4265E38-F078-4580-BA90-15E46168BCD6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{80B67E37-8540-4DA6-8F21-6A18F76FCE8B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80B67E37-8540-4DA6-8F21-6A18F76FCE8B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80B67E37-8540-4DA6-8F21-6A18F76FCE8B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{80B67E37-8540-4DA6-8F21-6A18F76FCE8B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -48,6 +59,7 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{C4CEB4F7-4549-491B-8517-D9F1F5FB4384} = {2CC55E37-174F-4EFA-A488-FED3BB257A03}
 		{A4265E38-F078-4580-BA90-15E46168BCD6} = {857C53CE-8760-4DA4-BF77-AC5AE9E4BC03}
+		{80B67E37-8540-4DA6-8F21-6A18F76FCE8B} = {2F987568-2137-4E91-BFAA-B2B464FEEBE1}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D0160E8A-53B6-4538-9595-FB8103091796}
