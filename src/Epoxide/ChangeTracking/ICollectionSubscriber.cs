@@ -7,22 +7,29 @@ using Epoxide.Linq.Expressions;
 
 namespace Epoxide.ChangeTracking;
 
-public interface ICollectionSubscriber
+public delegate void CollectionChangedCallback < T > ( IEnumerable < T > collection, CollectionChange < T > change );
+
+public interface ICollectionSubscription < T > : IDisposable
 {
-    IDisposable Subscribe < T > ( IEnumerable < T > collection, CollectionChangedCallback < T > k );
-    void Invalidate < T > ( IEnumerable < T > collection );
+    public IEnumerable < T > Collection { get; }
+}
+
+public interface ICollectionSubscriber : IDisposable
+{
+    IDisposable Subscribe  < T > ( IEnumerable < T > collection, CollectionChangedCallback < T > k );
+    void        Invalidate < T > ( IEnumerable < T > collection );
 }
 
 public interface ICollectionSubscriptionFactory
 {
-    CollectionSubscription< T >? Create < T >( IEnumerable < T > collection, CollectionChangedCallback< T > callback );
+    ICollectionSubscription < T >? Create < T > ( IEnumerable < T > collection, CollectionChangedCallback < T > callback );
 }
 
-public class CollectionSubscriptionFactory : ICollectionSubscriptionFactory
+public class DefaultCollectionSubscriptionFactory : ICollectionSubscriptionFactory
 {
-    public CollectionSubscription< T >? Create< T > ( IEnumerable < T > collection, CollectionChangedCallback< T > callback )
+    public ICollectionSubscription < T >? Create < T > ( IEnumerable < T > collection, CollectionChangedCallback < T > callback )
     {
-        return collection is INotifyCollectionChanged ? new NotifyCollectionChangedCollectionSubscription< T > ( collection, callback ) :
+        return collection is INotifyCollectionChanged ? new NotifyCollectionChangedCollectionSubscription < T > ( collection, callback ) :
                                                         null;
     }
 }
@@ -229,34 +236,24 @@ public class CollectionChangeSet < T > : List < CollectionChange < T > >, IColle
     public CollectionChangeSet ( IEnumerable < CollectionChange < T > > changes ) : base ( changes ) { }
 }
 
-public delegate void CollectionChangedCallback < T > ( IEnumerable < T > collection, CollectionChange < T > change );
-
-public abstract class CollectionSubscription < T > : IDisposable
+public sealed class NotifyCollectionChangedCollectionSubscription < T > : ICollectionSubscription < T >
 {
-    protected CollectionSubscription ( IEnumerable < T > collection, CollectionChangedCallback < T > callback )
+    public NotifyCollectionChangedCollectionSubscription ( IEnumerable < T > collection, CollectionChangedCallback < T > callback )
     {
         Collection = collection ?? throw new ArgumentNullException ( nameof ( collection ) );
         Callback   = callback   ?? throw new ArgumentNullException ( nameof ( callback ) );
-    }
 
-    public IEnumerable < T > Collection { get; }
-
-    protected CollectionChangedCallback < T > Callback { get; }
-
-    public abstract void Dispose ( );
-}
-
-public sealed class NotifyCollectionChangedCollectionSubscription < T > : CollectionSubscription < T >
-{
-    public NotifyCollectionChangedCollectionSubscription ( IEnumerable < T > collection, CollectionChangedCallback < T > callback ) : base ( collection, callback )
-    {
         if ( collection is not INotifyCollectionChanged ncc )
             throw new ArgumentException ( "Collection must implement INotifyCollectionChanged", nameof ( collection ) );
 
         ncc.CollectionChanged += Collection_CollectionChanged;
     }
 
-    public override void Dispose ( )
+    public IEnumerable < T > Collection { get; }
+
+    private CollectionChangedCallback < T > Callback { get; }
+
+    public void Dispose ( )
     {
         ( (INotifyCollectionChanged) Collection ).CollectionChanged -= Collection_CollectionChanged;
     }
@@ -278,7 +275,7 @@ public sealed class NotifyCollectionChangedCollectionSubscription < T > : Collec
     };
 }
 
-public class CollectionSubscriber : ICollectionSubscriber
+public sealed class CollectionSubscriber : ICollectionSubscriber
 {
     private readonly ICollectionSubscriptionFactory factory;
 
@@ -287,20 +284,13 @@ public class CollectionSubscriber : ICollectionSubscriber
         this.factory = factory;
     }
 
-    readonly Dictionary<Type, object> typedSubscribers =
-        new Dictionary<Type, object> ( );
+    readonly ConcurrentDictionary<Type, IDisposable> typedSubscribers =
+        new ConcurrentDictionary<Type, IDisposable> ( );
 
     public IDisposable Subscribe < T > ( IEnumerable < T > collection, CollectionChangedCallback < T > k )
     {
         var key = typeof(T);
-        var sub = (CollectionSubscriber<T>?) null;
-        if ( !typedSubscribers.TryGetValue ( key, out var subs ) )
-        {
-            sub = new CollectionSubscriber<T> ( factory );
-            typedSubscribers.Add ( key, sub );
-        }
-        else
-            sub = (CollectionSubscriber<T>?) subs;
+        var sub = (CollectionSubscriber<T>?) typedSubscribers.GetOrAdd ( key, _ => new CollectionSubscriber<T> ( factory ) );
 
         return sub.Subscribe ( collection, k );
     }
@@ -308,20 +298,21 @@ public class CollectionSubscriber : ICollectionSubscriber
     public void Invalidate < T > ( IEnumerable < T > collection )
     {
         var key = typeof(T);
-        var sub = (CollectionSubscriber<T>?) null;
-        if ( !typedSubscribers.TryGetValue ( key, out var subs ) )
-        {
-            sub = new CollectionSubscriber<T> ( factory );
-            typedSubscribers.Add ( key, sub );
-        }
-        else
-            sub = (CollectionSubscriber<T>?) subs;
+        var sub = typedSubscribers.TryGetValue ( key, out var value ) ? (CollectionSubscriber<T>) value : null;
 
-        sub.Invalidate ( collection );
+        sub?.Invalidate ( collection );
+    }
+
+    public void Dispose ( )
+    {
+        foreach ( var entry in typedSubscribers )
+            entry.Value.Dispose ( );
+
+        typedSubscribers.Clear ( );
     }
 }
 
-public class CollectionSubscriber < T >
+public sealed class CollectionSubscriber < T > : IDisposable
 {
     private readonly ConcurrentDictionary < IEnumerable < T >, Entry > entries = new ( );
     private readonly ICollectionSubscriptionFactory                    factory;
@@ -337,7 +328,7 @@ public class CollectionSubscriber < T >
         var entry = entries.GetOrAdd ( key, _ => new ( ) );
         var token = new Token { Subscriber = this, Key = key, Entry = entry, Callback = callback };
 
-        entry.Subscription ??= factory.Create < T > ( collection, entry.SubscriptionCallback );
+        entry.Subscription ??= factory.Create ( collection, entry.SubscriptionCallback );
         entry.Callback      += callback;
 
         return token;
@@ -349,9 +340,20 @@ public class CollectionSubscriber < T >
             callback ( collection, CollectionChange < T >.Invalidated ( ) );
     }
 
+    public void Dispose ( )
+    {
+        foreach ( var entry in entries )
+        {
+            entry.Value.Subscription?.Dispose ( );
+            entry.Value.Subscription = null;
+        }
+
+        entries.Clear ( );
+    }
+
     private class Entry
     {
-        public CollectionSubscription    < T >? Subscription;
+        public ICollectionSubscription   < T >? Subscription;
         public CollectionChangedCallback < T >? Callback;
 
         public void SubscriptionCallback ( IEnumerable < T > collection, CollectionChange < T > change )

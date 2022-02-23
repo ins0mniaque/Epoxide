@@ -3,7 +3,15 @@ using System.ComponentModel;
 
 namespace Epoxide.ChangeTracking;
 
-public interface IMemberSubscriber
+public delegate void MemberChangedCallback ( object target, MemberInfo member );
+
+public interface IMemberSubscription : IDisposable
+{
+    object     Target { get; }
+    MemberInfo Member { get; }
+}
+
+public interface IMemberSubscriber : IDisposable
 {
     IDisposable Subscribe  ( object target, MemberInfo member, MemberChangedCallback callback );
     void        Invalidate ( object target, MemberInfo member );
@@ -11,45 +19,35 @@ public interface IMemberSubscriber
 
 public interface IMemberSubscriptionFactory
 {
-    MemberSubscription? Create ( object target, MemberInfo member, MemberChangedCallback callback );
+    IMemberSubscription? Create ( object target, MemberInfo member, MemberChangedCallback callback );
 }
 
-public class MemberSubscriptionFactory : IMemberSubscriptionFactory
+public class DefaultMemberSubscriptionFactory : IMemberSubscriptionFactory
 {
-    public MemberSubscription? Create ( object target, MemberInfo member, MemberChangedCallback callback )
+    public IMemberSubscription? Create ( object target, MemberInfo member, MemberChangedCallback callback )
     {
         return target is INotifyPropertyChanged npc ? new NotifyPropertyChangedMemberSubscription ( npc,    member, callback ) :
                                                       new GenericEventMemberSubscription          ( target, member, callback );
     }
 }
 
-public delegate void MemberChangedCallback ( object target, MemberInfo member );
-
-public abstract class MemberSubscription : IDisposable
+public sealed class NotifyPropertyChangedMemberSubscription : IMemberSubscription
 {
-    protected MemberSubscription ( object target, MemberInfo member, MemberChangedCallback callback )
+    public NotifyPropertyChangedMemberSubscription ( INotifyPropertyChanged target, MemberInfo member, MemberChangedCallback callback )
     {
         Target   = target   ?? throw new ArgumentNullException ( nameof ( target ) );
         Member   = member   ?? throw new ArgumentNullException ( nameof ( member ) );
         Callback = callback ?? throw new ArgumentNullException ( nameof ( callback ) );
+
+        target.PropertyChanged += TargetOnPropertyChanged;
     }
 
     public object     Target { get; }
     public MemberInfo Member { get; }
 
-    protected MemberChangedCallback Callback { get; }
+    private MemberChangedCallback Callback { get; }
 
-    public abstract void Dispose ( );
-}
-
-public sealed class NotifyPropertyChangedMemberSubscription : MemberSubscription
-{
-    public NotifyPropertyChangedMemberSubscription ( INotifyPropertyChanged target, MemberInfo member, MemberChangedCallback callback ) : base ( target, member, callback )
-    {
-        target.PropertyChanged += TargetOnPropertyChanged;
-    }
-
-    public override void Dispose ( )
+    public void Dispose ( )
     {
         ( (INotifyPropertyChanged) Target ).PropertyChanged -= TargetOnPropertyChanged;
     }
@@ -61,17 +59,26 @@ public sealed class NotifyPropertyChangedMemberSubscription : MemberSubscription
     }
 }
 
-public sealed class GenericEventMemberSubscription : MemberSubscription
+public sealed class GenericEventMemberSubscription : IMemberSubscription
 {
     EventInfo? eventInfo;
     Delegate? eventHandler;
 
-    public GenericEventMemberSubscription ( object target, MemberInfo member, MemberChangedCallback callback ) : base ( target, member, callback )
+    public GenericEventMemberSubscription ( object target, MemberInfo member, MemberChangedCallback callback )
     {
+        Target   = target   ?? throw new ArgumentNullException ( nameof ( target ) );
+        Member   = member   ?? throw new ArgumentNullException ( nameof ( member ) );
+        Callback = callback ?? throw new ArgumentNullException ( nameof ( callback ) );
+
         AddHandlerForFirstExistingEvent ( member.Name + "Changed", "EditingDidEnd", "ValueChanged", "Changed" );
     }
 
-    public override void Dispose ( )
+    public object     Target { get; }
+    public MemberInfo Member { get; }
+
+    private MemberChangedCallback Callback { get; }
+
+    public void Dispose ( )
     {
         if ( eventInfo == null ) return;
 
@@ -148,7 +155,7 @@ public sealed class GenericEventMemberSubscription : MemberSubscription
     }
 }
 
-public class MemberSubscriber : IMemberSubscriber
+public sealed class MemberSubscriber : IMemberSubscriber
 {
     private readonly ConcurrentDictionary < (object, MemberInfo), Entry > entries = new ( );
     private readonly IMemberSubscriptionFactory                           factory;
@@ -176,9 +183,20 @@ public class MemberSubscriber : IMemberSubscriber
             callback ( target, member );
     }
 
+    public void Dispose ( )
+    {
+        foreach ( var entry in entries )
+        {
+            entry.Value.Subscription?.Dispose ( );
+            entry.Value.Subscription = null;
+        }
+
+        entries.Clear ( );
+    }
+
     private class Entry
     {
-        public MemberSubscription?    Subscription;
+        public IMemberSubscription?   Subscription;
         public MemberChangedCallback? Callback;
 
         public void SubscriptionCallback ( object target, MemberInfo member )

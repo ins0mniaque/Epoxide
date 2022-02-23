@@ -32,8 +32,8 @@ public class BindingServices : IBinderServices
 
 public class DefaultBindingServices : IBinderServices
 {
-    public IMemberSubscriber     MemberSubscriber          { get; } = new MemberSubscriber        ( new MemberSubscriptionFactory     ( ) );
-    public ICollectionSubscriber CollectionSubscriber      { get; } = new CollectionSubscriber    ( new CollectionSubscriptionFactory ( ) );
+    public IMemberSubscriber     MemberSubscriber          { get; } = new MemberSubscriber        ( new DefaultMemberSubscriptionFactory     ( ) );
+    public ICollectionSubscriber CollectionSubscriber      { get; } = new CollectionSubscriber    ( new DefaultCollectionSubscriptionFactory ( ) );
     public ISchedulerSelector    SchedulerSelector         { get; } = new NoSchedulerSelector     ( );
     public IExceptionHandler     UnhandledExceptionHandler { get; } = new RethrowExceptionHandler ( );
 }
