@@ -125,6 +125,9 @@ public sealed class Trigger < TSource >
         {
             base.VisitMember ( node );
 
+            if ( node.Expression == null )
+                return node;
+
             var expression = Expression.Lambda ( node.Expression, Parameters );
 
             Triggers.Add ( new Trigger < TSource >
@@ -143,15 +146,18 @@ public sealed class Trigger < TSource >
         // {
         //     base.VisitMethodCall ( node );
         //
+        //     if ( node.Expression == null )
+        //         return node;
+        //
         //     var expression = Expression.Lambda ( node.Expression, Parameters );
         //
-        //    Triggers.Add ( new Trigger < TSource >
-        //    {
-        //        Accessor = Services.SchedulerSelector.SelectScheduler ( expression ) is { } scheduler ?
-        //                   new ScheduledExpressionAccessor < TSource > ( expression, scheduler ) :
-        //                   new ExpressionAccessor          < TSource > ( expression ),
-        //        Member   = node.Method
-        //    } );
+        //     Triggers.Add ( new Trigger < TSource >
+        //     {
+        //         Accessor = Services.SchedulerSelector.SelectScheduler ( expression ) is { } scheduler ?
+        //                    new ScheduledExpressionAccessor < TSource > ( expression, scheduler ) :
+        //                    new ExpressionAccessor          < TSource > ( expression ),
+        //         Member   = node.Method
+        //     } );
         //
         //     return node;
         // }

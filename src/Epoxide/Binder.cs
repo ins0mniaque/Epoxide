@@ -171,6 +171,7 @@ public class Binder : IBinder
                 // TODO: Create static method to cache reflection
                 var eventBindingCtor = eventBindingType.GetConstructor ( new [ ] { typeof ( IBinderServices ), typeof ( LambdaExpression ), typeof ( EventInfo ), typeof ( IBinding < > ).MakeGenericType ( eventArgsType ) } );
 
+                // TODO: Set source
                 return (IBinding < TSource >) eventBindingCtor.Invoke ( new object [ ] { services, eventSource, eventInfo, eventBinding } );
             }
         }
