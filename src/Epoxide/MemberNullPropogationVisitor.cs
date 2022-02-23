@@ -414,9 +414,12 @@ public class TaskResultToAwaitableVisitor : ExpressionVisitor
                                                                 typeof ( IBinderServices ).GetProperty ( nameof ( IBinderServices.SchedulerSelector ) ) );
 
             var task      = ( (MemberExpression) left ).Expression;
-            var scheduler = Expression.Call ( schedulerSelector, selectScheduler, Expression.Constant ( right.Body ) );
+            var scheduler = (Expression) Expression.Constant ( null, typeof ( IScheduler ) );
 
-            return Expression.Call ( await.MakeGenericMethod ( left.Type, right.Body.Type ),
+            if ( right != null )
+                 scheduler = Expression.Call ( schedulerSelector, selectScheduler, Expression.Constant ( right.Body ) );
+
+            return Expression.Call ( await.MakeGenericMethod ( left.Type, right?.Body.Type ?? left.Type ),
                                      task,
                                      scheduler,
                                      right,
