@@ -33,10 +33,12 @@ public class BindingExceptionHandler : IExceptionHandler
     }
 }
 
-public static class Binding
+/// <summary>
+/// An exception that is thrown when an error is encountered while binding.
+/// </summary>
+[ Serializable ]
+public sealed class BindingException : Exception
 {
-    public static IBinding Unknown => UnknownBinding.Instance;
-
     public static ExceptionDispatchInfo Capture ( Exception exception )
     {
         exception = Unwrap ( exception );
@@ -55,30 +57,6 @@ public static class Binding
         return exception;
     }
 
-    [ DebuggerDisplay ( nameof ( Binding ) + "." + nameof ( Unknown ) ) ]
-    private sealed class UnknownBinding : IBinding
-    {
-        public static readonly UnknownBinding Instance = new UnknownBinding ( );
-
-        private UnknownBinding ( ) { }
-
-        public IBinderServices Services => Binder.Default.Services;
-
-        public void Attach ( IDisposable disposable ) => throw new NotImplementedException ( );
-        public bool Detach ( IDisposable disposable ) => throw new NotImplementedException ( );
-
-        public void Bind    ( ) { }
-        public void Unbind  ( ) { }
-        public void Dispose ( ) { }
-    }
-}
-
-/// <summary>
-/// An exception that is thrown when an error is encountered while binding.
-/// </summary>
-[ Serializable ]
-public sealed class BindingException : Exception
-{
     [ NonSerialized ]
     private IBinding? binding;
 
@@ -128,11 +106,11 @@ public sealed class BindingException : Exception
     /// <summary>
     /// Gets or sets the binding that was involved in the error.
     /// </summary>
-    public IBinding Binding
+    public IBinding? Binding
     {
-        get => binding ?? Epoxide.Binding.Unknown;
+        get => binding;
         set => binding = value;
     }
 
-    public override string Message => binding != null ? $"Binding error: { base.Message }\nSource: { DebugView.Display ( Binding ) }" : base.Message;
+    public override string Message => $"Binding error: { base.Message }\nSource: { DebugView.Display ( Binding ) }";
 }

@@ -4,6 +4,7 @@ using NuGet.Protocol.Core.Types;
 
 using Epoxide;
 
+// TODO: Implement INotifyPropertyChanged
 public class ViewModel
 {
     public ViewModel ( )

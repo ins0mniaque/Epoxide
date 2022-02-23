@@ -38,6 +38,7 @@ public class DefaultBindingServices : IBinderServices
     public IExceptionHandler     UnhandledExceptionHandler { get; } = new RethrowExceptionHandler ( );
 }
 
+// TODO: Rename to avoid conflict with System.Reflection.Binder
 public interface IBinder
 {
     IBinderServices Services { get; }
