@@ -41,7 +41,6 @@ public static class Binding
     {
         exception = Unwrap ( exception );
 
-        // TODO: Produce nice error message
         return ExceptionDispatchInfo.Capture ( new BindingException ( exception.Message, exception ) );
     }
 
@@ -134,4 +133,6 @@ public sealed class BindingException : Exception
         get => binding ?? Epoxide.Binding.Unknown;
         set => binding = value;
     }
+
+    public override string Message => binding != null ? $"Binding error: { base.Message }\nSource: { DebugView.Display ( Binding ) }" : base.Message;
 }

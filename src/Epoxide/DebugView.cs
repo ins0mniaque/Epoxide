@@ -182,10 +182,16 @@ public class ExpressionDebugView
     }
 }
 
+public interface IDebugView
+{
+    string Display ( );
+}
+
 public static class DebugView
 {
     public const string DebuggerDisplay       = "{Epoxide.DebugView.Display(Epoxide.DebugView.Display(this)),nq}";
     public const int    DebuggerDisplayLength = 120;
+    public const string Null                  = "null";
 
     public static string Display ( string display )
     {
@@ -193,6 +199,18 @@ public static class DebugView
             display = display.Substring ( 0, DebuggerDisplayLength ) + "...";
 
         return display;
+    }
+
+    public static string Display ( object? anything )
+    {
+        return anything is IDebugView debugView ? debugView.Display  ( ) :
+                                                  anything?.ToString ( ) ??
+                                                  Null;
+    }
+
+    public static string Display ( IDebugView debugView )
+    {
+        return debugView.Display ( );
     }
 
     public static string Display ( Type type )
