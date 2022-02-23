@@ -1,7 +1,4 @@
-﻿using System.Linq.Expressions;
-using System.Reflection;
-
-namespace Epoxide.Linq.Expressions.Fingerprints;
+﻿namespace Epoxide.Linq.Expressions.Fingerprints;
 
 public class BinaryExpressionFingerprintTests
 {

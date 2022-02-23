@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.Linq.Expressions;
-using System.Reflection;
 
 using Epoxide.Linq.Expressions.Fingerprints;
 

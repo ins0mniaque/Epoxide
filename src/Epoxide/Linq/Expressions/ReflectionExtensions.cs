@@ -1,6 +1,4 @@
-﻿using System.Reflection;
-
-namespace Epoxide.Linq.Expressions;
+﻿namespace Epoxide.Linq.Expressions;
 
 public static class ReflectionExtensions
 {

@@ -1,6 +1,4 @@
-﻿using System.Diagnostics;
-
-namespace Epoxide.Disposables;
+﻿namespace Epoxide.Disposables;
 
 public static class Disposable
 {

@@ -1,7 +1,4 @@
 ﻿using System.Collections.ObjectModel;
-using System.Diagnostics;
-using System.Linq.Expressions;
-using System.Reflection;
 using System.Text.RegularExpressions;
 
 [ assembly: DebuggerDisplay ( Epoxide.DebugView.DebuggerDisplay, Target = typeof ( BinaryExpression           ) ) ]
