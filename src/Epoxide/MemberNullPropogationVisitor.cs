@@ -94,7 +94,7 @@ public class NullPropagationVisitor : ExpressionVisitor
     private BlockExpression PropagateNull ( Expression instance, Expression propertyAccess )
     {
         var safe    = Visit ( instance );
-        var caller  = Expression.Variable ( safe.Type, GenerateVariableName ( safe ) );
+        var caller  = Expression.Variable ( safe.Type, GenerateVariableName ( instance, safe ) );
         var assign  = Expression.Assign   ( caller, safe );
         var cast    = instance.IsNullableStruct ( ) ? caller : caller.RemoveNullable ( );
         var access  = new ExpressionReplacer ( node => node == instance ? cast : node ).Visit ( propertyAccess ).MakeNullable ( );
@@ -111,10 +111,20 @@ public class NullPropagationVisitor : ExpressionVisitor
                                   } );
     }
 
-    // TODO: Generate better variable names
-    private static string GenerateVariableName ( Expression instance )
+    private static string GenerateVariableName ( Expression instance, Expression safe )
     {
-        return "caller";
+        var name = instance.Type.Name;
+        if ( instance.NodeType == ExpressionType.MemberAccess )
+            name = ( (MemberExpression) instance ).Member.Name;
+
+        if ( char.IsUpper ( name [ 0 ] ) )
+            name = char.ToLowerInvariant ( name [ 0 ] ) + name.Substring ( 1 );
+
+        if ( safe.NodeType == ExpressionType.Block )
+            if ( ( (BlockExpression) safe ).Variables.LastOrDefault ( variable => variable.Name.StartsWith ( name, StringComparison.Ordinal ) ) is { } match )
+                name += int.TryParse ( match.Name.AsSpan ( name.Length ), out var index ) ? index + 1 : 2;
+
+        return name;
     }
 }
 
