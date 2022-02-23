@@ -175,6 +175,74 @@ public class BindingTests
         Assert.Equal ( right, -1 );
     }
 
+    public class Implicit
+    {
+        public Implicit ( string value )
+        {
+            Value = value;
+        }
+
+        public string Value { get; }
+
+        public class From : Implicit
+        {
+            public From ( string value ) : base ( value ) { }
+
+            public static implicit operator From ( string value ) => new From ( value );
+        }
+
+        public class To : Implicit
+        {
+            public To ( string value ) : base ( value ) { }
+
+            public static implicit operator string ( To to ) => to.Value;
+        }
+
+        public class Both : Implicit
+        {
+            public Both ( string value ) : base ( value ) { }
+
+            public static implicit operator Both   ( string value ) => new Both ( value );
+            public static implicit operator string ( Both   both  ) => both.Value;
+        }
+    }
+
+    [ Fact ]
+    public void ImplicitCast ( )
+    {
+        var left   = (Implicit.Both?) null;
+        var right  = "magic";
+
+        Binder.Default.Bind ( ( ) => left == right );
+
+        Assert.NotNull ( left );
+        Assert.Equal   ( "magic", left.Value );
+    }
+
+    [ Fact ]
+    public void ImplicitCastFrom ( )
+    {
+        var left   = (Implicit.From?) null;
+        var right  = "magic";
+
+        Binder.Default.Bind ( ( ) => left == (Implicit.From?) right );
+
+        Assert.NotNull ( left );
+        Assert.Equal   ( "magic", left.Value );
+    }
+
+    [ Fact ]
+    public void ImplicitCastTo ( )
+    {
+        var left   = (Implicit.To?) null;
+        var right  = "magic";
+
+        Binder.Default.Bind ( ( ) => left == right );
+
+        Assert.NotNull ( left );
+        Assert.Equal   ( "magic", left.Value );
+    }
+
     [ Fact ]
     public void Aggregate ( )
     {
