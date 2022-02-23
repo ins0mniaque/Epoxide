@@ -1,23 +1,11 @@
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 
 using Epoxide.ChangeTracking;
 using Epoxide.Disposables;
 using Epoxide.Linq.Expressions;
 
 namespace Epoxide;
-
-public interface IExceptionHandler
-{
-    // TODO: Add context
-    void Catch ( ExceptionDispatchInfo exception );
-}
-
-public class RethrowExceptionHandler : IExceptionHandler
-{
-    public void Catch ( ExceptionDispatchInfo exception ) => exception.Throw ( );
-}
 
 public interface IBinderServices
 {
@@ -48,10 +36,10 @@ public class BindingServices : IBinderServices
 
 public class DefaultBindingServices : IBinderServices
 {
-    public IMemberSubscriber     MemberSubscriber          { get; } = new MemberSubscriber     ( new MemberSubscriptionFactory     ( ) );
-    public ICollectionSubscriber CollectionSubscriber      { get; } = new CollectionSubscriber ( new CollectionSubscriptionFactory ( ) );
-    public ISchedulerSelector    SchedulerSelector         { get; } = new NoSchedulerSelector  ( );
-    public IExceptionHandler     UnhandledExceptionHandler { get; } = new RethrowExceptionHandler   ( );
+    public IMemberSubscriber     MemberSubscriber          { get; } = new MemberSubscriber        ( new MemberSubscriptionFactory     ( ) );
+    public ICollectionSubscriber CollectionSubscriber      { get; } = new CollectionSubscriber    ( new CollectionSubscriptionFactory ( ) );
+    public ISchedulerSelector    SchedulerSelector         { get; } = new NoSchedulerSelector     ( );
+    public IExceptionHandler     UnhandledExceptionHandler { get; } = new RethrowExceptionHandler ( );
 }
 
 public interface IBinder
@@ -276,7 +264,10 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
     {
         disposables = new CompositeDisposable ( 4 );
 
-        Services = services;
+        Services = new BindingServices ( services.MemberSubscriber,
+                                         services.CollectionSubscriber,
+                                         services.SchedulerSelector,
+                                         new BindingExceptionHandler ( this, services.UnhandledExceptionHandler ) );
 
         leftSide  = new Side ( this, left,  ReadThenWriteToOtherSide );
         rightSide = new Side ( this, right, ReadThenWriteToOtherSide );
@@ -491,7 +482,11 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >, IExp
     {
         disposables = new CompositeDisposable ( 3 );
 
-        Services          = services;
+        Services = new BindingServices ( services.MemberSubscriber,
+                                         services.CollectionSubscriber,
+                                         services.SchedulerSelector,
+                                         new BindingExceptionHandler ( this, services.UnhandledExceptionHandler ) );
+
         Event             = eventInfo;
         SubscribedBinding = subscribedBinding;
 

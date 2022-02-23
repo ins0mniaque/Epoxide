@@ -68,7 +68,7 @@ public class AwaitableTask < T, TResult > : IAwaitable
     {
         if ( Task.IsCompleted )
         {
-            if      (   Task.IsFaulted  ) callback ( state, default, ExceptionDispatchInfo.Capture ( Task.Exception ) );
+            if      (   Task.IsFaulted  ) callback ( state, default, Binding.Capture ( Task.Exception ) );
             else if ( ! Task.IsCanceled ) callback ( state, Task.Result, default );
 
             return Disposable.Empty;
@@ -86,7 +86,7 @@ public class AwaitableTask < T, TResult > : IAwaitable
         {
             try                                  { callback ( state, await task.ConfigureAwait ( false ), default ); }
             catch ( OperationCanceledException ) { }
-            catch ( Exception exception )        { callback ( state, default, ExceptionDispatchInfo.Capture ( exception ) ); }
+            catch ( Exception exception )        { callback ( state, default, Binding.Capture ( exception ) ); }
         }
     }
 
@@ -99,7 +99,7 @@ public class AwaitableTask < T, TResult > : IAwaitable
         {
             try                                  { callback ( state, selector ( source ), default ); }
             catch ( OperationCanceledException ) { }
-            catch ( Exception exception )        { callback ( state, default, ExceptionDispatchInfo.Capture ( exception ) ); }
+            catch ( Exception exception )        { callback ( state, default, Binding.Capture ( exception ) ); }
         }
     }
 }

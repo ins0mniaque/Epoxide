@@ -182,20 +182,20 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
     protected object? TryReadValue ( TSource source, out ExceptionDispatchInfo? exception )
     {
         try                   { exception = null; return ReadValue ( source ); }
-        catch ( Exception e ) { exception = ExceptionDispatchInfo.Capture ( e ); return null; }
+        catch ( Exception e ) { exception = Binding.Capture ( e ); return null; }
     }
 
     protected object? TryReadTarget ( TSource source, out ExceptionDispatchInfo? exception )
     {
         try                   { exception = null; return ReadTarget ( source ); }
-        catch ( Exception e ) { exception = ExceptionDispatchInfo.Capture ( e ); return null; }
+        catch ( Exception e ) { exception = Binding.Capture ( e ); return null; }
     }
 
     // TODO: Emit code to set value
     protected void TryWrite ( object target, object? value, out ExceptionDispatchInfo? exception )
     {
         try                   { exception = null; Target.Member.SetValue ( target, value ); }
-        catch ( Exception e ) { exception = ExceptionDispatchInfo.Capture ( e ); }
+        catch ( Exception e ) { exception = Binding.Capture ( e ); }
     }
 
     protected static SerialDisposable Disconnected ( SerialDisposable token )
