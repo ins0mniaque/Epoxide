@@ -8,7 +8,10 @@ public class View : Window
 {
     public View ( ViewModel model ) : this ( )
     {
-        // TODO: Fix implicit cast support
+        Epoxide.Binder.Default.Bind ( model, model =>
+            QueryField.Text == model.Query
+        );
+
         // Epoxide.Binder.Default.Bind ( model, model =>
         //     QueryField.Text == model.Query &&
         //     Results   .Rows == (object) model.Results.Select ( CreateRow )

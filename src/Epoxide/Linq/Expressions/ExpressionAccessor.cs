@@ -232,7 +232,7 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
 
     protected InvalidOperationException NotWritable ( )
     {
-        return new InvalidOperationException ( $"Expression { Expression } is not writable." );
+        return new InvalidOperationException ( $"Expression { Expression.Body } is not writable." );
     }
 }
 

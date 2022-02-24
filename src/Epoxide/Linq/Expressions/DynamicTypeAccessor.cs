@@ -53,6 +53,9 @@ public static class DynamicTypeAccessor
         if ( destType.IsAssignableFrom ( srcType ) )
             return source;
 
+        if ( destType == typeof ( string ) )
+            return source.ToString ( );
+
         // TODO: Only allow valid numeric casts 
         if ( ( srcType .IsPrimitive || srcType .IsEnum ) &&
              ( destType.IsPrimitive || destType.IsEnum ) )
@@ -73,6 +76,9 @@ public static class DynamicTypeAccessor
     private static bool CanCast ( Type srcType, Type destType )
     {
         if ( destType.IsAssignableFrom ( srcType ) )
+            return true;
+
+        if ( destType == typeof ( string ) )
             return true;
 
         // TODO: Only allow valid numeric casts 
