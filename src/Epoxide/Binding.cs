@@ -62,15 +62,7 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
             rightSide.Callback = ReadCollectionThenBindToOtherSide;
         }
         else
-        {
-            // TODO: BindingException + nicer Expression.ToString ( )
-            if ( left.Body.NodeType == ExpressionType.Convert && left.Body.Type == right.Body.Type && ( (UnaryExpression) left.Body ).Operand.IsWritable ( ) )
-                throw new ArgumentException ( $"Cannot assign { left.Body.Type } to { ( (UnaryExpression) left.Body ).Operand.Type }" );
-            else if ( right.Body.NodeType == ExpressionType.Convert && right.Body.Type == left.Body.Type && ( (UnaryExpression) right.Body ).Operand.IsWritable ( ) )
-                throw new ArgumentException ( $"Cannot assign { right.Body.Type } to { ( (UnaryExpression) right.Body ).Operand.Type }" );
-            
-            throw new ArgumentException ( $"Neither side is writable { left.Body } == { right.Body }" );
-        }
+            throw new ArgumentException ( $"Neither side is writable { DebugView.Display ( left.Body ) } == { DebugView.Display ( right.Body ) }" );
 
         disposables.Add ( leftSide .Container    );
         disposables.Add ( leftSide .Subscription );
@@ -238,6 +230,7 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
                                      ! IsMemberAccess ( leftSide.Accessor ) ? ">" : "" ) + " " +
                                      DebugView.Display ( rightSide.Accessor.Expression.Body );
 
+    [ DebuggerDisplay ( "{Accessor}" ) ]
     private class Side
     {
         public Side ( Binding < TSource > binding, LambdaExpression expression, Action < Side > callback )
@@ -388,6 +381,7 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >, IExp
     string IDebugView.Display ( ) => DebugView.Display ( eventSourceSide.Accessor.Expression.Body ) + "." + Event.Name +
                                      "(" + DebugView.Display ( SubscribedBinding ) + ")";
 
+    [ DebuggerDisplay ( "{Accessor}" ) ]
     private class Side
     {
         public Side ( EventBinding < TSource, TArgs > binding, LambdaExpression expression, Action < Side > callback )

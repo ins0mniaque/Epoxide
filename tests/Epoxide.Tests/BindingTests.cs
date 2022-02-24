@@ -164,9 +164,13 @@ public class BindingTests
 
         Assert.Equal ( right, 42 );
 
-        right = -1;
+        var exception = Assert.Throws < BindingException > ( ( ) => Binder.Default.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right ) );
 
-        Assert.Throws < ArgumentException > ( ( ) => Binder.Default.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right ) );
+        Assert.IsType < InvalidCastException > ( exception.InnerException );
+
+        Assert.Equal ( right, 42 );
+
+        right = -1;
 
         Binder.Default.Bind ( ( ) => left.State                     == right );
         Binder.Default.Bind ( ( ) => left.ToString ( ).Length       == right );
@@ -234,13 +238,12 @@ public class BindingTests
     [ Fact ]
     public void ImplicitCastTo ( )
     {
-        var left   = (Implicit.To?) null;
-        var right  = "magic";
+        var left   = new Implicit.To ( "magic" );
+        var right  = (string?) null;
 
         Binder.Default.Bind ( ( ) => left == right );
 
-        Assert.NotNull ( left );
-        Assert.Equal   ( "magic", left.Value );
+        Assert.Equal ( "magic", right );
     }
 
     [ Fact ]

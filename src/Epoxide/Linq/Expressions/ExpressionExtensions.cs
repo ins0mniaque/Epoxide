@@ -35,9 +35,18 @@ public static class ExpressionExtensions
         return node;
     }
 
-    public static bool IsWritable ( this Expression node )
+    public static MemberExpression? ToWritable ( this Expression node )
     {
-        return node.NodeType == ExpressionType.MemberAccess &&
-               ( (MemberExpression) node ).Member is PropertyInfo { CanWrite: true } or FieldInfo;
+        while ( node.NodeType == ExpressionType.Convert )
+            node = ( (UnaryExpression) node ).Operand;
+
+        if ( node.NodeType != ExpressionType.MemberAccess )
+            return null;
+
+        var memberAccess = (MemberExpression) node;
+        if ( memberAccess.Member is PropertyInfo { CanWrite: true } or FieldInfo )
+            return memberAccess;
+
+        return null;
     }
 }

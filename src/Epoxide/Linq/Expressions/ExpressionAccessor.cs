@@ -80,21 +80,31 @@ public interface IExpressionTransformer
     Expression Transform ( Expression expression );
 }
 
+[ DebuggerDisplay ( "{Expression}" ) ]
 public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
 {
-    public ExpressionAccessor ( LambdaExpression expression ) : this ( expression, Sentinel.Transformer ) { }
-    public ExpressionAccessor ( LambdaExpression expression, IExpressionTransformer transformer )
+    public ExpressionAccessor ( LambdaExpression expression )                                     : this ( expression, Sentinel.Transformer, null           ) { }
+    public ExpressionAccessor ( LambdaExpression expression, Type writeValueType )                : this ( expression, Sentinel.Transformer, writeValueType ) { }
+    public ExpressionAccessor ( LambdaExpression expression, IExpressionTransformer transformer ) : this ( expression, transformer,          null           ) { }
+    public ExpressionAccessor ( LambdaExpression expression, IExpressionTransformer transformer, Type? writeValueType = null )
     {
-        Expression   = expression ?? throw new ArgumentNullException ( nameof ( expression ) );
-        Transformer  = transformer;
-        IsCollection = expression.Body.Type.GetGenericInterfaceArguments ( typeof ( ICollection < > ) ) != null;
-        IsWritable   = expression.Body.IsWritable ( );
+        Expression     = expression ?? throw new ArgumentNullException ( nameof ( expression ) );
+        Transformer    = transformer;
+        IsCollection   = expression.Body.Type.GetGenericInterfaceArguments ( typeof ( ICollection < > ) ) != null;
+        Target         = expression.Body.ToWritable ( );
+        IsWritable     = Target != null && Target.Member.CanSetFrom ( writeValueType ?? expression.Body.Type );
+        WriteValueType = writeValueType ?? typeof ( object );
     }
 
-    public LambdaExpression       Expression   { get; }
-    public IExpressionTransformer Transformer  { get; }
-    public bool                   IsCollection { get; }
-    public bool                   IsWritable   { get; }
+    public LambdaExpression       Expression     { get; }
+    public IExpressionTransformer Transformer    { get; }
+    public bool                   IsCollection   { get; }
+    public bool                   IsWritable     { get; }
+    public Type                   WriteValueType { get; }
+
+    private   MemberExpression? Target { get; }
+    protected Expression        TargetExpression => Target?.Expression ?? throw NotWritable ( );
+    protected MemberInfo        TargetMember     => Target?.Member     ?? throw NotWritable ( );
 
     public virtual IDisposable Read < TState > ( TSource source, TState state, ExpressionAccessCallback < TSource, TState, ExpressionReadResult > callback )
     {
@@ -159,7 +169,7 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
             TryWrite ( target, value, out exception );
 
             if ( exception != null ) callback ( source, state, ExpressionWriteResult.Fault   ( Disconnected ( token ), exception ) );
-            else                     callback ( source, state, ExpressionWriteResult.Success ( Disconnected ( token ), target, Target.Member, value ) );
+            else                     callback ( source, state, ExpressionWriteResult.Success ( Disconnected ( token ), target, TargetMember, value ) );
         }
         else Await ( awaitable, token, source, state, (source, state, read) =>
         {
@@ -168,7 +178,7 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
                 TryWrite ( target, read.Value, out exception );
 
                 if ( exception != null ) callback ( source, state, ExpressionWriteResult.Fault   ( Disconnected ( token ), exception ) );
-                else                     callback ( source, state, ExpressionWriteResult.Success ( Disconnected ( token ), target, Target.Member, read.Value ) );
+                else                     callback ( source, state, ExpressionWriteResult.Success ( Disconnected ( token ), target, TargetMember, read.Value ) );
             }
             else if ( read.Faulted ) callback ( source, state, ExpressionWriteResult.Fault   ( Disconnected ( token ), read.Exception ) );
             else                     callback ( source, state, ExpressionWriteResult.Failure ( Disconnected ( token ) ) );
@@ -189,10 +199,9 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
         catch ( Exception e ) { exception = BindingException.Capture ( e ); return null; }
     }
 
-    // TODO: Emit code to set value
     protected void TryWrite ( object target, object? value, out ExceptionDispatchInfo? exception )
     {
-        try                   { exception = null; Target.Member.SetValue ( target, value ); }
+        try                   { exception = null; WriteTarget ( target, value ); }
         catch ( Exception e ) { exception = BindingException.Capture ( e ); }
     }
 
@@ -207,9 +216,10 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
     protected Func < TSource, object? >  ReadValue => readValue ??= Compile ( Expression.Body, Expression.Parameters );
 
     private   Func < TSource, object? >? readTarget;
-    protected Func < TSource, object? >  ReadTarget      => readTarget ??= Compile ( Target.Expression, Expression.Parameters );
-    protected MemberExpression           Target          => IsWritable ? (MemberExpression) Expression.Body : throw NotWritable ( );
-    protected InvalidOperationException  NotWritable ( ) => new InvalidOperationException ( $"Expression { Expression } is not writable." );
+    protected Func < TSource, object? >  ReadTarget => readTarget ??= Compile ( TargetExpression, Expression.Parameters );
+
+    private   Action < object, object? >? writeTarget;
+    protected Action < object, object? >  WriteTarget => writeTarget ??= DynamicTypeAccessor.CompileSetter ( TargetMember, WriteValueType );
 
     protected Func < TSource, object? > Compile ( Expression expression, IReadOnlyCollection < ParameterExpression > parameters )
     {
@@ -218,6 +228,11 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
             expression = System.Linq.Expressions.Expression.Convert ( expression, typeof ( object ) );
 
         return CachedExpressionCompiler.Compile ( System.Linq.Expressions.Expression.Lambda < Func < TSource, object? > > ( expression, parameters ) );
+    }
+
+    protected InvalidOperationException NotWritable ( )
+    {
+        return new InvalidOperationException ( $"Expression { Expression } is not writable." );
     }
 }
 
