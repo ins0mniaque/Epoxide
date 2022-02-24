@@ -1,23 +1,36 @@
-﻿using NuGet.Common;
-using NuGet.Protocol;
-using NuGet.Protocol.Core.Types;
+﻿using System.Collections.ObjectModel;
+using System.ComponentModel;
 
 using Epoxide;
 
-// TODO: Implement INotifyPropertyChanged
-public class ViewModel
+using NuGet.Common;
+using NuGet.Protocol;
+using NuGet.Protocol.Core.Types;
+
+public class ViewModel : BindableObject
 {
+    private class Property : PropertyChangedEventArgsFactory
+    {
+        public static PropertyChangedEventArgs Query { get; } = Create ( );
+    }
+
     public ViewModel ( )
     {
         // TODO: Add support for tasks without .Result
-        // Epoxide.Binder.Default.Bind ( this, vm =>
-        //     vm.Results == SearchAsync ( vm.Query, CancellationToken.None )
-        // );
+        Epoxide.Binder.Default.Bind ( this, vm =>
+            vm.Results == SearchAsync ( vm.Query, CancellationToken.None ).Result
+        );
     }
 
-    public string Query { get; set; } = string.Empty;
+    private string query = string.Empty;
+    public  string Query
+    {
+        get => query;
+        set => Set ( ref query, value ?? string.Empty, Property.Query );
+    }
 
-    public IReadOnlyCollection < IPackageSearchMetadata > Results { get; private set; }
+    // TODO: Use own collection
+    public IReadOnlyCollection < IPackageSearchMetadata > Results { get; } = new ObservableCollection < IPackageSearchMetadata > ( );
 
     private static async Task < IEnumerable < IPackageSearchMetadata > > SearchAsync ( string? query, CancellationToken cancellationToken )
     {

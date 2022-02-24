@@ -1,8 +1,8 @@
 ﻿using System.Data;
 
-using NuGet.Protocol.Core.Types;
-
 using Epoxide;
+
+using NuGet.Protocol.Core.Types;
 
 public class View : Window
 {
