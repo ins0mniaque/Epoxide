@@ -61,9 +61,6 @@ public sealed class NotifyPropertyChangedMemberSubscription : IMemberSubscriptio
 
 public sealed class GenericEventMemberSubscription : IMemberSubscription
 {
-    EventInfo? eventInfo;
-    Delegate? eventHandler;
-
     public GenericEventMemberSubscription ( object target, MemberInfo member, MemberChangedCallback callback )
     {
         Target   = target   ?? throw new ArgumentNullException ( nameof ( target ) );
@@ -75,42 +72,38 @@ public sealed class GenericEventMemberSubscription : IMemberSubscription
 
     public object     Target { get; }
     public MemberInfo Member { get; }
+    public EventInfo? Event  { get; private set; }
 
-    private MemberChangedCallback Callback { get; }
+    private MemberChangedCallback Callback     { get; }
+    private Delegate?             EventHandler { get; set; }
 
     public void Dispose ( )
     {
-        if ( eventInfo == null ) return;
+        Event?.RemoveEventHandler ( Target, EventHandler );
 
-        eventInfo.RemoveEventHandler ( Target, eventHandler );
-
-        eventInfo = null;
-        eventHandler = null;
+        Event        = null;
+        EventHandler = null;
     }
 
-    void HandleAnyEvent ( object? sender, EventArgs e )
+    private void HandleEvent ( )
     {
         Callback ( Target, Member );
     }
 
-    bool AddHandlerForFirstExistingEvent ( params string [ ] names )
+    private bool AddHandlerForFirstExistingEvent ( params string [ ] names )
     {
         var type = Target.GetType ( );
+
         foreach ( var name in names )
         {
-            var ev = GetEvent ( type, name );
+            var @event = GetEvent ( type, name );
 
-            if ( ev != null )
+            if ( @event != null )
             {
-                eventInfo = ev;
-                var isClassicHandler = typeof(EventHandler).GetTypeInfo ( )
-                    .IsAssignableFrom ( ev.EventHandlerType.GetTypeInfo ( ) );
+                Event        = @event;
+                EventHandler = DynamicEvent.Create ( @event, HandleEvent );
 
-                eventHandler = isClassicHandler
-                    ? (EventHandler) HandleAnyEvent
-                    : CreateGenericEventHandler ( ev, ( ) => HandleAnyEvent ( null, EventArgs.Empty ) );
-
-                ev.AddEventHandler ( Target, eventHandler );
+                @event.AddEventHandler ( Target, EventHandler );
 
                 return true;
             }
@@ -119,39 +112,17 @@ public sealed class GenericEventMemberSubscription : IMemberSubscription
         return false;
     }
 
-    static EventInfo? GetEvent ( Type type, string eventName )
+    private static EventInfo? GetEvent ( Type type, string eventName )
     {
-        var t = type;
-        while ( t != null && t != typeof(object) )
+        while ( type != null && type != typeof ( object ) )
         {
-            var ti = t.GetTypeInfo ( );
-            var ev = ti.GetDeclaredEvent ( eventName );
-            if ( ev != null ) return ev;
-            t = ti.BaseType;
+            if ( type.GetEvent ( eventName ) is { } @event )
+                return @event;
+
+            type = type.BaseType;
         }
 
         return null;
-    }
-
-    static Dictionary<EventInfo, Delegate> cache = new Dictionary<EventInfo, Delegate>();
-    static Delegate CreateGenericEventHandler ( EventInfo evt, Action d )
-    {
-        if ( cache.TryGetValue ( evt, out var handler ) )
-            return handler;
-
-        var handlerType = evt.EventHandlerType;
-        var handlerTypeInfo = handlerType.GetTypeInfo ( );
-        var handlerInvokeInfo = handlerTypeInfo.GetDeclaredMethod ( nameof ( Action.Invoke ) );
-        var eventParams = handlerInvokeInfo.GetParameters ( );
-
-        var parameters = eventParams.Select ( p => Expression.Parameter ( p.ParameterType, p.Name ) ).ToArray ( );
-        var body = Expression.Call ( Expression.Constant ( d ),
-            d.GetType ( ).GetTypeInfo ( ).GetDeclaredMethod ( nameof ( Action.Invoke ) ) );
-        var lambda = Expression.Lambda ( body, parameters );
-
-        cache [ evt ] = handler = lambda.Compile ( );
-
-        return handler;
     }
 }
 

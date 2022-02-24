@@ -231,10 +231,11 @@ public static class DebugView
 
     public static string Display ( MemberInfo member ) => member switch
     {
-        ConstructorInfo ctor     => Display ( ctor    .DeclaringType ) + "(" + string.Join ( ", ", ctor.GetParameters ( ).Select ( Display ) ) + ")",
-        FieldInfo       field    => Display ( field   .FieldType     ) + " " + Display ( field   .DeclaringType ) + "." + field   .Name,
-        PropertyInfo    property => Display ( property.PropertyType  ) + " " + Display ( property.DeclaringType ) + "." + property.Name,
-        MethodInfo      method   => Display ( method  .ReturnType    ) + " " + Display ( method  .DeclaringType ) + "." + method  .Name +
+        ConstructorInfo ctor     => Display ( ctor    .DeclaringType    ) + "(" + string.Join ( ", ", ctor.GetParameters ( ).Select ( Display ) ) + ")",
+        EventInfo       @event   => Display ( @event  .EventHandlerType ) + " " + Display ( @event  .DeclaringType ) + "." + @event  .Name,
+        FieldInfo       field    => Display ( field   .FieldType        ) + " " + Display ( field   .DeclaringType ) + "." + field   .Name,
+        PropertyInfo    property => Display ( property.PropertyType     ) + " " + Display ( property.DeclaringType ) + "." + property.Name,
+        MethodInfo      method   => Display ( method  .ReturnType       ) + " " + Display ( method  .DeclaringType ) + "." + method  .Name +
                                     ( method.IsGenericMethod ? "<" + string.Join ( ", ", method.GetGenericArguments ( ).Select ( Display ) ) + ">" : "" ) +
                                     "(" + string.Join ( ", ", method.GetParameters ( ).Select ( Display ) ) + ")",
         _                        => member.ToString ( )
