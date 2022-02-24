@@ -53,9 +53,6 @@ public static class DynamicTypeAccessor
         if ( destType.IsAssignableFrom ( srcType ) )
             return source;
 
-        if ( destType == typeof ( string ) )
-            return source.ToString ( );
-
         // TODO: Only allow valid numeric casts 
         if ( ( srcType .IsPrimitive || srcType .IsEnum ) &&
              ( destType.IsPrimitive || destType.IsEnum ) )
@@ -70,15 +67,18 @@ public static class DynamicTypeAccessor
         if ( cast != null && cast.ReturnType == destType )
             return cast.Invoke ( null, new [ ] { source } );
 
+        if ( destType == typeof ( string ) )
+            return source.ToString ( );
+
         throw new InvalidCastException ( $"Invalid cast from '{ DebugView.Display ( srcType ) }' to '{ destType }'." );
     }
 
     private static bool CanCast ( Type srcType, Type destType )
     {
-        if ( destType.IsAssignableFrom ( srcType ) )
+        if ( destType == typeof ( string ) )
             return true;
 
-        if ( destType == typeof ( string ) )
+        if ( destType.IsAssignableFrom ( srcType ) )
             return true;
 
         // TODO: Only allow valid numeric casts 
