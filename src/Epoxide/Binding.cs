@@ -39,11 +39,14 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
                                          services.SchedulerSelector,
                                          new BindingExceptionHandler ( this, services.UnhandledExceptionHandler ) );
 
-        leftSide  = new Side ( this, left,  ReadThenWriteToOtherSide );
-        rightSide = new Side ( this, right, ReadThenWriteToOtherSide );
+        leftSide  = new Side ( this, left,  ReadThenWaitForOtherSide );
+        rightSide = new Side ( this, right, ReadThenWaitForOtherSide );
 
         leftSide .OtherSide = rightSide;
         rightSide.OtherSide = leftSide;
+
+        if ( leftSide .Accessor.IsWritable ) rightSide.Callback = ReadThenWriteToOtherSide;
+        if ( rightSide.Accessor.IsWritable ) leftSide .Callback = ReadThenWriteToOtherSide;
 
         if      ( leftSide .Accessor.IsWritable ) initialSide = rightSide;
         else if ( rightSide.Accessor.IsWritable ) initialSide = leftSide;
@@ -110,6 +113,22 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
     public bool Detach  ( IDisposable disposable ) => leftSide.Container.Remove ( disposable ) || rightSide.Container.Remove ( disposable ) || disposables.Remove ( disposable );
     public void Dispose ( )                        => disposables.Dispose ( );
 
+    private void ReadThenWaitForOtherSide ( Side side )
+    {
+        BeforeAccess   ( side );
+        ScheduleAccess ( side, side.Accessor.Read ( Source, side, WaitForOtherSide ) );
+    }
+
+    private void WaitForOtherSide ( TSource source, Side side, ExpressionReadResult result )
+    {
+        AfterAccess ( side, result.Token );
+
+        if ( result.Faulted )
+            Services.UnhandledExceptionHandler.Catch ( result.Exception );
+
+        side.OtherSide.Initialize ( Source );
+    }
+
     private void ReadThenWriteToOtherSide ( Side side )
     {
         BeforeAccess   ( side );
@@ -120,16 +139,16 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
     {
         AfterAccess ( side, result.Token );
 
+        var otherSide = side.OtherSide;
+
         if ( result.Faulted )
-        {
             Services.UnhandledExceptionHandler.Catch ( result.Exception );
-            return;
-        }
 
         if ( ! result.Succeeded )
+        {
+            otherSide.Initialize ( Source );
             return;
-
-        var otherSide = side.OtherSide;
+        }
 
         BeforeAccess   ( otherSide );
         ScheduleAccess ( otherSide, otherSide.Accessor.Write ( Source, otherSide, result.Value, AfterWrite ) );
@@ -138,6 +157,7 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
         {
             AfterAccess ( otherSide, result.Token );
 
+            // TODO: Invalidate only if trigger has no subscription
             if ( result.Faulted )
                 Services.UnhandledExceptionHandler.Catch ( result.Exception );
             else if ( result.Succeeded && ! Equals ( Value, Value = result.Value ) )
@@ -161,10 +181,7 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
         AfterAccess ( side, result.Token );
 
         if ( result.Faulted )
-        {
             Services.UnhandledExceptionHandler.Catch ( result.Exception );
-            return;
-        }
 
         if ( ! result.Succeeded || result.Value == null )
             return;
@@ -201,7 +218,7 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
 
     private void AfterAccess ( Side side, IDisposable? scheduled )
     {
-        side.Subscription.Subscribe ( Source );
+        side.Initialize ( Source );
 
         UnscheduleAccess ( side, scheduled );
     }
@@ -243,11 +260,21 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
             Subscription = new ExpressionSubscription < TSource > ( binding.Services, expression, (e, s, o, m) => Callback ( this ) );
         }
 
-        public ExpressionAccessor < TSource >     Accessor     { get; }
-        public Action < Side >                    Callback     { get; set; }
-        public CompositeDisposable                Container    { get; }
-        public ExpressionSubscription < TSource > Subscription { get; }
-        public Side                               OtherSide    { get; set; }
+        public ExpressionAccessor < TSource >     Accessor      { get; }
+        public Action < Side >                    Callback      { get; set; }
+        public bool                               IsInitialized { get; private set; }
+        public CompositeDisposable                Container     { get; }
+        public ExpressionSubscription < TSource > Subscription  { get; }
+        public Side                               OtherSide     { get; set; }
+
+        public void Initialize ( TSource source )
+        {
+            if ( ! IsInitialized || ! Equals ( Subscription.Source, source ) )
+            {
+                IsInitialized = true;
+                Subscription.Subscribe ( source );
+            }
+        }
     }
 }
 
@@ -326,10 +353,7 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >, IExp
         AfterAccess ( side, result.Token );
 
         if ( result.Faulted )
-        {
             Services.UnhandledExceptionHandler.Catch ( result.Exception );
-            return;
-        }
 
         if ( ! result.Succeeded || result.Value == null )
             return;
@@ -365,7 +389,7 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >, IExp
 
     private void AfterAccess ( Side side, IDisposable? scheduled )
     {
-        side.Subscription.Subscribe ( Source );
+        side.Initialize ( Source );
 
         UnscheduleAccess ( side, scheduled );
     }
@@ -394,10 +418,20 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >, IExp
             Subscription = new ExpressionSubscription < TSource > ( binding.Services, expression, (e, s, o, m) => Callback ( this ) );
         }
 
-        public ExpressionAccessor < TSource >     Accessor     { get; }
-        public Action < Side >                    Callback     { get; set; }
-        public CompositeDisposable                Container    { get; }
-        public ExpressionSubscription < TSource > Subscription { get; }
+        public ExpressionAccessor < TSource >     Accessor      { get; }
+        public Action < Side >                    Callback      { get; set; }
+        public bool                               IsInitialized { get; private set; }
+        public CompositeDisposable                Container     { get; }
+        public ExpressionSubscription < TSource > Subscription  { get; }
+
+        public void Initialize ( TSource source )
+        {
+            if ( ! IsInitialized || ! Equals ( Subscription.Source, source ) )
+            {
+                IsInitialized = true;
+                Subscription.Subscribe ( source );
+            }
+        }
     }
 
     private sealed class Token : IDisposable

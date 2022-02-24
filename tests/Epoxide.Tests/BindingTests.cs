@@ -109,6 +109,42 @@ public class BindingTests
     }
 
     [ Fact ]
+    public void Invalidate ( )
+    {
+        var left  = "";
+        var right = "hello";
+
+        Binder.Default.Bind ( ( ) => left == right );
+
+        Assert.Equal ( left, right );
+        Assert.Equal ( left, "hello" );
+
+        left = "goodbye";
+
+        Binder.Default.Invalidate ( ( ) => left );
+
+        Assert.Equal ( left, right );
+        Assert.Equal ( left, "goodbye" );
+    }
+
+    [ Fact ]
+    public void InvalidateReadOnly ( )
+    {
+        var left  = new { ReadOnly = 42 };
+        var right = -1;
+
+        Binder.Default.Bind ( ( ) => left.ReadOnly == right );
+
+        Assert.Equal ( left.ReadOnly, right );
+        Assert.Equal ( left.ReadOnly, 42 );
+
+        Binder.Default.Invalidate ( ( ) => right );
+
+        Assert.Equal ( left.ReadOnly, right );
+        Assert.Equal ( left.ReadOnly, 42 );
+    }
+
+    [ Fact ]
     public void AutoConvert ( )
     {
         var right = 0.0;
