@@ -398,6 +398,8 @@ public class TaskResultToAwaitableVisitor : ExpressionVisitor
     private static MethodInfo? await;
     private static MethodInfo? selectScheduler;
     private static Expression? schedulerSelector;
+    private static MethodInfo? createLinkedTokenSource;
+    private static Expression? defaultCancellationToken;
 
     public override Expression Visit ( Expression node )
     {
@@ -416,17 +418,37 @@ public class TaskResultToAwaitableVisitor : ExpressionVisitor
             if ( right != null )
                  scheduler = Expression.Call ( schedulerSelector, selectScheduler, Expression.Constant ( right.Body ) );
 
+            var cancellationTokenSource = (Expression) Expression.New ( typeof ( CancellationTokenSource ) );
+            var cancellationToken       = GetCancellationToken ( task );
+
+            if ( ! IsDefaultCancellationToken ( cancellationToken ) )
+            {
+                createLinkedTokenSource  ??= new Func < CancellationToken, CancellationToken, CancellationTokenSource > ( CancellationTokenSource.CreateLinkedTokenSource ).Method;
+                defaultCancellationToken ??= Expression.Constant ( CancellationToken.None );
+
+                cancellationTokenSource = Expression.Call ( createLinkedTokenSource, cancellationToken, defaultCancellationToken );
+            }
+
             return Expression.Call ( await.MakeGenericMethod ( left.Type, right?.Body.Type ?? left.Type ),
                                      task,
                                      scheduler,
                                      right,
-                                     GetCancellationToken ( task ) );
+                                     cancellationTokenSource );
         }
 
         return node;
     }
 
-    private static Expression? defaultCancellationToken;
+    private static bool IsDefaultCancellationToken ( Expression cancellationToken )
+    {
+        if ( cancellationToken == defaultCancellationToken )
+            return true;
+
+        if ( cancellationToken.NodeType != ExpressionType.Constant )
+            return false;
+
+        return ( (ConstantExpression) cancellationToken ).Value is CancellationToken token && token == CancellationToken.None;
+    }
 
     private static Expression GetCancellationToken ( Expression task )
     {

@@ -12,29 +12,29 @@ public interface IAwaitable
 // TODO: Add IAsyncEnumerable/IObservable support
 public static class Awaitable
 {
-    public static object? AsAwaitable < T, TResult > ( this Task < T > source, IScheduler? scheduler, Func < T, TResult >? selector, CancellationToken cancellationToken )
+    public static object? AsAwaitable < T, TResult > ( this Task < T > source, IScheduler? scheduler, Func < T, TResult >? selector, CancellationTokenSource cancellation )
     {
         if ( source == null )
             throw new ArgumentNullException ( nameof ( source ) );
 
-        return new AwaitableTask < T, TResult > ( source, scheduler, selector, cancellationToken );
+        return new AwaitableTask < T, TResult > ( source, scheduler, selector, cancellation );
     }
 }
 
 public class AwaitableTask < T, TResult > : IAwaitable
 {
-    public AwaitableTask ( Task < T > task, IScheduler? scheduler, Func < T, TResult >? selector, CancellationToken cancellationToken )
+    public AwaitableTask ( Task < T > task, IScheduler? scheduler, Func < T, TResult >? selector, CancellationTokenSource cancellation )
     {
-        Task              = task;
-        Scheduler         = scheduler;
-        Selector          = selector;
-        CancellationToken = cancellationToken;
+        Task         = task;
+        Scheduler    = scheduler;
+        Selector     = selector;
+        Cancellation = cancellation;
     }
 
-    public Task < T >           Task              { get; }
-    public IScheduler?          Scheduler         { get; }
-    public Func < T, TResult >? Selector          { get; }
-    public CancellationToken    CancellationToken { get; }
+    public Task < T >              Task         { get; }
+    public IScheduler?             Scheduler    { get; }
+    public Func < T, TResult >?    Selector     { get; }
+    public CancellationTokenSource Cancellation { get; }
 
     public IDisposable Await < TState > ( TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
     {
@@ -74,13 +74,9 @@ public class AwaitableTask < T, TResult > : IAwaitable
             return Disposable.Empty;
         }
 
-        var cancellation = Disposable.Empty;
-        if ( CancellationToken != CancellationToken.None )
-            cancellation = CancellationTokenSource.CreateLinkedTokenSource ( CancellationToken );
-
         AwaitTask ( Task, state, callback );
 
-        return cancellation;
+        return Cancellation;
 
         async static void AwaitTask ( Task < T > task, TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
         {
