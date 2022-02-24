@@ -157,8 +157,10 @@ public class Binder : IBinder
                 var eventName     = m.Arguments.Count == 3 ? (string) ( (ConstantExpression) m.Arguments [ 1 ] ).Value : b.EventName;
                 var eventSource   = Expression.Lambda ( m.Arguments [ 0 ], lambda.Parameters );
                 var eventLambda   = (LambdaExpression) m.Arguments [ ^1 ];
-                var eventInfo     = eventSource.Body.Type.GetEvent ( eventName ) ??
-                                    throw new InvalidOperationException ( $"Event { eventName } not found on type { eventSource.Body.Type.FullName }" );
+                var eventInfo     = DynamicEvent.FindEvent       ( eventSource.Body.Type, eventName ) is { } @event ?
+                                    DynamicEvent.EnsureSupported ( @event ) :
+                                    throw new InvalidOperationException ( $"Event { eventName } not found on type { DebugView.Display ( eventSource.Body.Type ) }" );
+
                 var eventArgsType = eventInfo.EventHandlerType.GetMethod ( nameof ( Action.Invoke ) ).GetParameters ( ).Last ( ).ParameterType;
 
                 if ( eventLambda.Parameters.Count == 0 )

@@ -19,11 +19,24 @@ public static class DynamicEvent
                method.GetParameters ( ).Length <= 8;
     }
 
+    public static EventInfo EnsureSupported ( EventInfo @event )
+    {
+        var method = @event.EventHandlerType.GetMethod ( nameof ( Action.Invoke ) );
+
+        if ( method.ReturnType != typeof ( void ) )
+            throw new NotSupportedException ( $"Event { DebugView.Display ( @event ) } has a return type" );
+
+        if ( method.GetParameters ( ).Length > 8 )
+            throw new NotSupportedException ( $"Event { DebugView.Display ( @event ) } has too many arguments" );
+
+        return @event;
+    }
+
     public static EventInfo? FindEvent ( Type type, string eventName )
     {
         while ( type != null && type != typeof ( object ) )
         {
-            if ( type.GetEvent ( eventName ) is { } @event && Supports ( @event ) )
+            if ( type.GetEvent ( eventName ) is { } @event )
                 return @event;
 
             type = type.BaseType;

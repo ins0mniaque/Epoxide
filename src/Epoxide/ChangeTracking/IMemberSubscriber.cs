@@ -56,7 +56,7 @@ public class DefaultMemberSubscriptionFactory : IMemberSubscriptionFactory
                      DynamicEvent.FindEvent ( type, "ValueChanged" )          ??
                      DynamicEvent.FindEvent ( type, "Changed" );
 
-        if ( @event != null )
+        if ( @event != null && DynamicEvent.Supports ( @event ) )
             return new DynamicEventMemberSubscription ( @event, target, member, callback );
 
         return null;
@@ -119,7 +119,7 @@ public sealed class DynamicEventMemberSubscription : IMemberSubscription
         EventHandler = null;
     }
 
-    private void HandleEvent ( object [ ] arguments )
+    private void HandleEvent ( object? [ ] arguments )
     {
         Callback ( Target, Member );
     }

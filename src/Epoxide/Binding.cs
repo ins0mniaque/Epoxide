@@ -363,13 +363,15 @@ public sealed class EventBinding < TSource, TArgs > : IBinding < TSource >, IExp
     }
 
     private Delegate? eventHandler;
-    private Delegate  EventHandler => eventHandler ??= Delegate.CreateDelegate ( Event.EventHandlerType, this, nameof ( HandleEvent ) );
+    private Delegate  EventHandler => eventHandler ??= DynamicEvent.Create ( Event, HandleEvent );
 
-    // TODO: Add support for any events using code from GenericEventMemberSubscription
-    private void HandleEvent ( object sender, TArgs args )
+    private void HandleEvent ( object? [ ] arguments )
     {
+        var args   = arguments.Length > 1 ? arguments.Skip ( 1 ).Append ( arguments [ 0 ] ) : arguments;
+        var source = args.OfType < TArgs > ( ).FirstOrDefault ( );
+
         SubscribedBinding.Unbind ( );
-        SubscribedBinding.Source = args;
+        SubscribedBinding.Source = source;
         SubscribedBinding.Bind ( );
     }
 
