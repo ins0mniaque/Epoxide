@@ -47,8 +47,19 @@ public class DefaultMemberSubscriptionFactory : IMemberSubscriptionFactory
 {
     public IMemberSubscription? Create ( object target, MemberInfo member, MemberChangedCallback callback )
     {
-        return target is INotifyPropertyChanged npc ? new NotifyPropertyChangedMemberSubscription ( npc,    member, callback ) :
-                                                      new GenericEventMemberSubscription          ( target, member, callback );
+        if ( target is INotifyPropertyChanged npc )
+            return new NotifyPropertyChangedMemberSubscription ( npc, member, callback );
+
+        var type   = target.GetType ( );
+        var @event = DynamicEvent.FindEvent ( type, member.Name + "Changed" ) ??
+                     DynamicEvent.FindEvent ( type, "EditingDidEnd" )         ??
+                     DynamicEvent.FindEvent ( type, "ValueChanged" )          ??
+                     DynamicEvent.FindEvent ( type, "Changed" );
+
+        if ( @event != null )
+            return new DynamicEventMemberSubscription ( @event, target, member, callback );
+
+        return null;
     }
 }
 
@@ -80,70 +91,37 @@ public sealed class NotifyPropertyChangedMemberSubscription : IMemberSubscriptio
     }
 }
 
-public sealed class GenericEventMemberSubscription : IMemberSubscription
+public sealed class DynamicEventMemberSubscription : IMemberSubscription
 {
-    public GenericEventMemberSubscription ( object target, MemberInfo member, MemberChangedCallback callback )
+    public DynamicEventMemberSubscription ( EventInfo @event, object target, MemberInfo member, MemberChangedCallback callback )
     {
-        Target   = target   ?? throw new ArgumentNullException ( nameof ( target ) );
-        Member   = member   ?? throw new ArgumentNullException ( nameof ( member ) );
-        Callback = callback ?? throw new ArgumentNullException ( nameof ( callback ) );
+        Event        = @event   ?? throw new ArgumentNullException ( nameof ( @event ) );
+        Target       = target   ?? throw new ArgumentNullException ( nameof ( target ) );
+        Member       = member   ?? throw new ArgumentNullException ( nameof ( member ) );
+        Callback     = callback ?? throw new ArgumentNullException ( nameof ( callback ) );
+        EventHandler = DynamicEvent.Create ( @event, HandleEvent );
 
-        AddHandlerForFirstExistingEvent ( member.Name + "Changed", "EditingDidEnd", "ValueChanged", "Changed" );
+        Event.AddEventHandler ( Target, EventHandler );
     }
 
+    public EventInfo  Event  { get; }
     public object     Target { get; }
     public MemberInfo Member { get; }
-    public EventInfo? Event  { get; private set; }
 
     private MemberChangedCallback Callback     { get; }
     private Delegate?             EventHandler { get; set; }
 
     public void Dispose ( )
     {
-        Event?.RemoveEventHandler ( Target, EventHandler );
+        if ( EventHandler is { } eventHandler )
+            Event.RemoveEventHandler ( Target, eventHandler );
 
-        Event        = null;
         EventHandler = null;
     }
 
     private void HandleEvent ( )
     {
         Callback ( Target, Member );
-    }
-
-    private bool AddHandlerForFirstExistingEvent ( params string [ ] names )
-    {
-        var type = Target.GetType ( );
-
-        foreach ( var name in names )
-        {
-            var @event = GetEvent ( type, name );
-
-            if ( @event != null )
-            {
-                Event        = @event;
-                EventHandler = DynamicEvent.Create ( @event, HandleEvent );
-
-                @event.AddEventHandler ( Target, EventHandler );
-
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static EventInfo? GetEvent ( Type type, string eventName )
-    {
-        while ( type != null && type != typeof ( object ) )
-        {
-            if ( type.GetEvent ( eventName ) is { } @event )
-                return @event;
-
-            type = type.BaseType;
-        }
-
-        return null;
     }
 }
 

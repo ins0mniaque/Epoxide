@@ -11,6 +11,27 @@ public static class DynamicEvent
         return cache.GetOrAdd ( @event, CreateDelegateFactory ) ( callback );
     }
 
+    public static bool Supports ( EventInfo @event )
+    {
+        var method = @event.EventHandlerType.GetMethod ( nameof ( Action.Invoke ) );
+
+        return method.ReturnType == typeof ( void ) &&
+               method.GetParameters ( ).Length <= 8;
+    }
+
+    public static EventInfo? FindEvent ( Type type, string eventName )
+    {
+        while ( type != null && type != typeof ( object ) )
+        {
+            if ( type.GetEvent ( eventName ) is { } @event && Supports ( @event ) )
+                return @event;
+
+            type = type.BaseType;
+        }
+
+        return null;
+    }
+
     private static readonly Func < Action, Delegate > identity = callback => callback;
     private static readonly Func < Action, Delegate > classic  = callback => (EventHandler) ( (o, e) => callback ( ) );
 
