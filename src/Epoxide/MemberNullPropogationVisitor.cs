@@ -344,9 +344,6 @@ public class AggregateInvalidatorVisitor : ExpressionVisitor
             return Expression.Call ( invalidates.MakeGenericMethod ( node.Method.GetGenericArguments ( ) ), node, Expression.Constant ( node.Arguments [ 0 ] ) );
         }
 
-        if ( node.Method.DeclaringType != typeof ( BindableEnumerable ) || node.Method.ReturnType.GetGenericInterfaceArguments ( typeof ( IBindableEnumerable < > ) ) != null )
-            return node;
-
         return base.VisitMethodCall ( node );
     }
 }
