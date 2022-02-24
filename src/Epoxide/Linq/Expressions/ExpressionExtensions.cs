@@ -35,6 +35,12 @@ public static class ExpressionExtensions
         return node;
     }
 
+    public static bool IsCollection ( this Expression node )
+    {
+        return node.Type.GetGenericInterfaceArguments ( typeof ( ICollection         < > ) ) != null ||
+               node.Type.GetGenericInterfaceArguments ( typeof ( IReadOnlyCollection < > ) ) != null;
+    }
+
     public static MemberExpression? ToWritable ( this Expression node )
     {
         while ( node.NodeType == ExpressionType.Convert )

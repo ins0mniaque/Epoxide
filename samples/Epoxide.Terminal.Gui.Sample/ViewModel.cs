@@ -7,19 +7,20 @@ using NuGet.Common;
 using NuGet.Protocol;
 using NuGet.Protocol.Core.Types;
 
+// TODO: Add view model for IPackageSearchMetadata
 public class ViewModel : BindableObject
 {
-    private class Property : PropertyChangedEventArgsFactory
-    {
-        public static PropertyChangedEventArgs Query { get; } = Create ( );
-    }
-
     public ViewModel ( )
     {
         // TODO: Add support for tasks without .Result
         Epoxide.Binder.Default.Bind ( this, vm =>
             vm.Results == SearchAsync ( vm.Query, CancellationToken.None ).Result
         );
+    }
+
+    private class Property : PropertyChangedEventArgsFactory
+    {
+        public static PropertyChangedEventArgs Query { get; } = Create ( );
     }
 
     private string query = string.Empty;

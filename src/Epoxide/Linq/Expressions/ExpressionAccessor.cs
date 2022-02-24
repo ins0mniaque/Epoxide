@@ -90,8 +90,8 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
     {
         Expression     = expression ?? throw new ArgumentNullException ( nameof ( expression ) );
         Transformer    = transformer;
-        IsCollection   = expression.Body.Type.GetGenericInterfaceArguments ( typeof ( ICollection < > ) ) != null;
-        Target         = expression.Body.ToWritable ( );
+        Target         = expression.Body.ToWritable   ( );
+        IsCollection   = expression.Body.IsCollection ( );
         IsWritable     = Target != null && Target.Member.CanSetFrom ( writeValueType ?? expression.Body.Type );
         WriteValueType = writeValueType ?? typeof ( object );
     }
