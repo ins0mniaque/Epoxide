@@ -119,7 +119,7 @@ public sealed class DynamicEventMemberSubscription : IMemberSubscription
         EventHandler = null;
     }
 
-    private void HandleEvent ( )
+    private void HandleEvent ( object [ ] arguments )
     {
         Callback ( Target, Member );
     }
