@@ -11,10 +11,31 @@ public interface IMemberSubscription : IDisposable
     MemberInfo Member { get; }
 }
 
+/// <summary>
+/// Specifies the behavior of a subscriber upon invalidation.
+/// </summary>
+public enum InvalidationMode
+{
+    /// <summary>
+    /// The default setting for this enumeration, which is currently <see cref="Optimized" />.
+    /// </summary>
+    Default,
+
+    /// <summary>
+    /// Forces the invalidation to occur immediately.
+    /// </summary>
+    Forced,
+
+    /// <summary>
+    /// Allows the subscriber to determine whether and when invalidation is necessary.
+    /// </summary>
+    Optimized
+}
+
 public interface IMemberSubscriber : IDisposable
 {
     IDisposable Subscribe  ( object target, MemberInfo member, MemberChangedCallback callback );
-    void        Invalidate ( object target, MemberInfo member );
+    void        Invalidate ( object target, MemberInfo member, InvalidationMode      mode     );
 }
 
 public interface IMemberSubscriptionFactory
@@ -148,10 +169,11 @@ public sealed class MemberSubscriber : IMemberSubscriber
         return token;
     }
 
-    public void Invalidate ( object target, MemberInfo member )
+    public void Invalidate ( object target, MemberInfo member, InvalidationMode mode )
     {
         if ( entries.TryGetValue ( (target, member), out var entry ) && entry.Callback is { } callback )
-            callback ( target, member );
+            if ( mode == InvalidationMode.Forced || entry.Subscription != null )
+                callback ( target, member );
     }
 
     public void Dispose ( )

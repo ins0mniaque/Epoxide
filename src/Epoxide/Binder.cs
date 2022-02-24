@@ -108,7 +108,7 @@ public static class BinderExtensions
             var m = (MemberExpression) expression;
             var x = Sentinel.Transformer.Transform ( m.Expression );
             if ( CachedExpressionCompiler.Evaluate ( x ) is { } obj && obj != Sentinel.Value )
-                services.MemberSubscriber.Invalidate ( obj, m.Member );
+                services.MemberSubscriber.Invalidate ( obj, m.Member, InvalidationMode.Forced );
         }
         else
             throw new NotSupportedException();

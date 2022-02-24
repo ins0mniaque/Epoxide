@@ -157,11 +157,10 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
         {
             AfterAccess ( otherSide, result.Token );
 
-            // TODO: Invalidate only if trigger has no subscription
             if ( result.Faulted )
                 Services.UnhandledExceptionHandler.Catch ( result.Exception );
             else if ( result.Succeeded && ! Equals ( Value, Value = result.Value ) )
-                Services.MemberSubscriber.Invalidate ( otherSide.Accessor.Expression, result.Member );
+                Services.MemberSubscriber.Invalidate ( otherSide.Accessor.Expression, result.Member, InvalidationMode.Default );
         }
     }
 
