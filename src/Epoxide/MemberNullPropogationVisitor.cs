@@ -44,7 +44,6 @@ public class SentinelExpressionTransformer : IExpressionTransformer
     }
 }
 
-// TODO: Fix simple field accesses being transformed in variables
 public class NullPropagationVisitor : ExpressionVisitor
 {
     protected override Expression VisitUnary ( UnaryExpression node )
@@ -81,52 +80,16 @@ public class NullPropagationVisitor : ExpressionVisitor
         if ( node.Expression.IsClosure ( ) )
             return base.VisitMember ( node );
 
-        return PropagateNull ( node.Expression, node );
+        return node.PropagateNull ( Visit ( node.Expression ) );
     }
 
     protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
         // TODO: Fix support for functions (NodeType == Parameter)
-        if ( node.Object == null || node.Object.NodeType == ExpressionType.Parameter )
+        if ( node.Object != null && node.Object.NodeType == ExpressionType.Parameter )
            return node;
 
-        return PropagateNull ( node.Object, node );
-    }
-
-    private BlockExpression PropagateNull ( Expression instance, Expression propertyAccess )
-    {
-        var safe    = Visit ( instance );
-        var caller  = Expression.Variable ( safe.Type, GenerateVariableName ( instance, safe ) );
-        var assign  = Expression.Assign   ( caller, safe );
-        var cast    = instance.IsNullableStruct ( ) ? caller : caller.RemoveNullable ( );
-        var access  = new ExpressionReplacer ( node => node == instance ? cast : node ).Visit ( propertyAccess ).MakeNullable ( );
-        var ternary = Expression.Condition ( test:    Expression.Equal ( caller, Expression.Constant ( null ) ),
-                                             ifTrue:  Expression.Constant ( null, access.Type ),
-                                             ifFalse: access );
-
-        return Expression.Block ( type:        access.Type,
-                                  variables:   new [ ] { caller },
-                                  expressions: new Expression [ ]
-                                  {
-                                      assign,
-                                      ternary
-                                  } );
-    }
-
-    private static string GenerateVariableName ( Expression instance, Expression safe )
-    {
-        var name = instance.Type.Name;
-        if ( instance.NodeType == ExpressionType.MemberAccess )
-            name = ( (MemberExpression) instance ).Member.Name;
-
-        if ( char.IsUpper ( name [ 0 ] ) )
-            name = char.ToLowerInvariant ( name [ 0 ] ) + name.Substring ( 1 );
-
-        if ( safe.NodeType == ExpressionType.Block )
-            if ( ( (BlockExpression) safe ).Variables.LastOrDefault ( variable => variable.Name.StartsWith ( name, StringComparison.Ordinal ) ) is { } match )
-                name += int.TryParse ( match.Name.AsSpan ( name.Length ), out var index ) ? index + 1 : 2;
-
-        return name;
+        return node.PropagateNull ( Visit ( node.Object ), node.Arguments );
     }
 }
 
