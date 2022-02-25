@@ -19,6 +19,65 @@ public static class Awaitable
 
         return new AwaitableTask < T, TResult > ( source, scheduler, selector, cancellation );
     }
+
+    public static object? AsDelayed < T > ( this T source, TimeSpan delay )
+    {
+        return new AwaitableDelay < T > ( source, delay );
+    }
+
+    public static T Delay < T > ( this T source, TimeSpan delay )
+    {
+        return source;
+    }
+
+    // TODO: Move to AwaitableTask?
+    public static IDisposable AwaitTask < T, TState > ( Task < T > task, CancellationTokenSource cancellation, TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
+    {
+        if ( task.IsCompleted )
+        {
+            if      (   task.IsFaulted  ) callback ( state, default, BindingException.Capture ( task.Exception ) );
+            else if ( ! task.IsCanceled ) callback ( state, task.Result, default );
+
+            return Disposable.Empty;
+        }
+
+        AwaitTask ( task, state, callback );
+
+        return cancellation;
+
+        async static void AwaitTask ( Task < T > task, TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
+        {
+            try                                  { callback ( state, await task.ConfigureAwait ( false ), default ); }
+            catch ( OperationCanceledException ) { }
+            catch ( Exception exception )        { callback ( state, default, BindingException.Capture ( exception ) ); }
+        }
+    }
+}
+
+public class AwaitableDelay < T > : IAwaitable
+{
+    public AwaitableDelay ( T source, TimeSpan delay )
+    {
+        Source = source;
+        Delay  = delay;
+    }
+
+    public T        Source { get; }
+    public TimeSpan Delay  { get; }
+
+    public IDisposable Await < TState > ( TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
+    {
+        var cancellation = new CancellationTokenSource ( );
+
+        return Awaitable.AwaitTask ( DelaySource ( cancellation.Token ), cancellation, state, callback );
+    }
+
+    private async Task < T > DelaySource ( CancellationToken cancellationToken )
+    {
+        await Task.Delay ( Delay, cancellationToken );
+
+        return Source;
+    }
 }
 
 public class AwaitableTask < T, TResult > : IAwaitable
@@ -46,7 +105,7 @@ public class AwaitableTask < T, TResult > : IAwaitable
     {
         var token = new SerialDisposable ( );
 
-        token.Disposable = AwaitTask ( state, (state, value, exception) =>
+        token.Disposable = Awaitable.AwaitTask ( Task, Cancellation, state, (state, value, exception) =>
         {
             if ( exception != null ) callback ( state, default, exception );
             else                     token.Disposable = scheduler.Schedule ( state, state => SelectResult ( state, value, callback ) );
@@ -57,33 +116,11 @@ public class AwaitableTask < T, TResult > : IAwaitable
 
     private IDisposable AwaitWithoutScheduler < TState > ( TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
     {
-        return AwaitTask ( state, (state, value, exception) =>
+        return Awaitable.AwaitTask ( Task, Cancellation, state, (state, value, exception) =>
         {
             if ( exception != null ) callback ( state, default, exception );
             else                     SelectResult ( state, value, callback );
         } );
-    }
-
-    private IDisposable AwaitTask < TState > ( TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
-    {
-        if ( Task.IsCompleted )
-        {
-            if      (   Task.IsFaulted  ) callback ( state, default, BindingException.Capture ( Task.Exception ) );
-            else if ( ! Task.IsCanceled ) callback ( state, Task.Result, default );
-
-            return Disposable.Empty;
-        }
-
-        AwaitTask ( Task, state, callback );
-
-        return Cancellation;
-
-        async static void AwaitTask ( Task < T > task, TState state, Action < TState, object?, ExceptionDispatchInfo? > callback )
-        {
-            try                                  { callback ( state, await task.ConfigureAwait ( false ), default ); }
-            catch ( OperationCanceledException ) { }
-            catch ( Exception exception )        { callback ( state, default, BindingException.Capture ( exception ) ); }
-        }
     }
 
     private void SelectResult < TState > ( TState state, object? value, Action < TState, object?, ExceptionDispatchInfo? > callback )

@@ -23,10 +23,12 @@ public class SentinelExpressionTransformer : IExpressionTransformer
 {
     private static readonly NullPropagationVisitor       nullPropagationVisitor = new ( );
     private static readonly TaskResultToAwaitableVisitor awaitableTaskVisitor   = new ( );
+    private static readonly AwaitableDelayVisitor        awaitableDelayVisitor  = new ( );
 
     public Expression Transform ( Expression expression )
     {
         expression = awaitableTaskVisitor  .Visit ( expression );
+        expression = awaitableDelayVisitor .Visit ( expression );
         expression = nullPropagationVisitor.Visit ( expression );
 
         if ( expression.NodeType == ExpressionType.Coalesce && ( (BinaryExpression) expression ).Right is ConstantExpression )
@@ -386,8 +388,22 @@ public class BinderServicesReplacerVisitor : ExpressionVisitor
             return Expression.Call ( invalidates.MakeGenericMethod ( node.Method.GetGenericArguments ( ) ), node, Expression.Constant ( node.Arguments [ 0 ] ) );
         }
 
-        if ( node.Method.DeclaringType != typeof ( BindableEnumerable ) || node.Method.ReturnType.GetGenericInterfaceArguments ( typeof ( IBindableEnumerable < > ) ) != null )
-            return node;
+        return base.VisitMethodCall ( node );
+    }
+}
+
+public class AwaitableDelayVisitor : ExpressionVisitor
+{
+    private static MethodInfo? asDelayed;
+
+    protected override Expression VisitMethodCall ( MethodCallExpression node )
+    {
+        if ( node.Method.DeclaringType == typeof ( Awaitable ) && node.Method.Name == nameof ( Awaitable.Delay ) )
+        {
+            asDelayed ??= typeof ( Awaitable ).GetMethod ( nameof ( Awaitable.AsDelayed ) );
+
+            return Expression.Call ( node.Object, asDelayed.MakeGenericMethod ( node.Method.GetGenericArguments ( ) ), node.Arguments );
+        }
 
         return base.VisitMethodCall ( node );
     }
