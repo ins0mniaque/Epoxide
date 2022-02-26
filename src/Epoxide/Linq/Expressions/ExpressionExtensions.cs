@@ -132,9 +132,17 @@ public static class ExpressionExtensions
 
     private readonly static ConstantExpression Null = Expression.Constant ( null );
 
-    // TODO: Fix simple field accesses being transformed in variables
     private static Expression PropagateSingleNull ( Expression access, Expression instance, Expression propagatedInstance )
     {
+        if ( instance == propagatedInstance )
+        {
+            access = access.MakeNullable ( );
+
+            return Expression.Condition ( test:    Expression.Equal    ( instance, Null ),
+                                          ifTrue:  Expression.Constant ( null, access.Type ),
+                                          ifFalse: access );
+        }
+
         var variable = Expression.Variable ( propagatedInstance.Type, GenerateVariableName ( instance, propagatedInstance ) );
         var assign   = Expression.Assign   ( variable, propagatedInstance );
 
