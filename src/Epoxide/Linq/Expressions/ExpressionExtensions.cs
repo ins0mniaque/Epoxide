@@ -56,6 +56,8 @@ public static class ExpressionExtensions
         return null;
     }
 
+    // TODO: Move to NullPropagator with extensions and self methods (non-propagated)
+    // TODO: Rename RecursivePropagateNull?
     public static Expression PropagateNull ( this BinaryExpression binary, Expression left, Expression right )
     {
         if ( binary.NodeType == ExpressionType.Coalesce )
@@ -177,6 +179,7 @@ public static class ExpressionExtensions
 
         for ( var index = 0; index < variables.Length; index++ )
         {
+            // TODO: Remove multiple array accesses
             variables   [ index ] = Expression.Variable ( propagatedInstance [ index ].Type, GenerateVariableName ( instance [ index ], propagatedInstance [ index ] ) );
             expressions [ index ] = Expression.Assign   ( variables [ index ], propagatedInstance [ index ] );
         }

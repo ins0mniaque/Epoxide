@@ -30,6 +30,7 @@ public class SentinelExpressionTransformer : IExpressionTransformer
         expression = awaitableTaskVisitor  .Visit ( expression );
         expression = awaitableDelayVisitor .Visit ( expression );
         expression = nullPropagationVisitor.Visit ( expression );
+        // expression = new SchedulableVisitor ( ).Visit ( expression );
 
         if ( expression.NodeType == ExpressionType.Coalesce && ( (BinaryExpression) expression ).Right is ConstantExpression )
             return expression;
@@ -42,6 +43,50 @@ public class SentinelExpressionTransformer : IExpressionTransformer
 
         // TODO: Store constant
         return Expression.Coalesce ( expression, Expression.Constant ( Sentinel.Value ) );
+    }
+}
+
+public class SchedulableVisitor : ExpressionVisitor
+{
+    bool recurseLambda = false;
+    SchedulableContext context = new ( );
+
+    protected override Expression VisitUnary ( UnaryExpression node )
+    {
+        if ( node.NodeType == ExpressionType.Quote )
+            return node;
+
+        return Visit ( node.Operand );
+    }
+
+    protected override Expression VisitParameter ( ParameterExpression node )
+    {
+        return node.AsSchedulable ( context );
+    }
+
+    protected override Expression VisitLambda < T > ( Expression < T > node )
+    {
+        return recurseLambda ? base.VisitLambda ( node ) : node;
+    }
+
+    protected override Expression VisitConditional ( ConditionalExpression node )
+    {
+        return node.PropagateNull ( Visit ( node.IfTrue ), Visit ( node.IfFalse ) );
+    }
+
+    protected override Expression VisitBinary ( BinaryExpression node )
+    {
+        return node.PropagateNull ( Visit ( node.Left ), Visit ( node.Right ) );
+    }
+
+    protected override Expression VisitMember ( MemberExpression node )
+    {
+        return node.AsSchedulable ( Visit ( node.Expression ), context );
+    }
+
+    protected override Expression VisitMethodCall ( MethodCallExpression node )
+    {
+        return node.AsSchedulable ( Visit ( node.Object ), node.Arguments.Select ( Visit ), context );
     }
 }
 
