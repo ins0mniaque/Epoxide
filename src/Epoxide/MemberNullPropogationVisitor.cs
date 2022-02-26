@@ -40,56 +40,46 @@ public class SentinelExpressionTransformer : IExpressionTransformer
         if ( expression.Type != typeof ( object ) )
             expression = Expression.Convert ( expression, typeof ( object ) );
 
+        // TODO: Store constant
         return Expression.Coalesce ( expression, Expression.Constant ( Sentinel.Value ) );
     }
 }
 
 public class NullPropagationVisitor : ExpressionVisitor
 {
+    bool recurseLambda = false;
+
     protected override Expression VisitUnary ( UnaryExpression node )
     {
-        if ( node.Operand is MemberExpression member )
-            return VisitMember ( member );
-
-        if ( node.Operand is MethodCallExpression method )
-            return VisitMethodCall ( method );
-
-        if ( node.Operand is ConditionalExpression condition )
-            return Expression.Condition ( test:    condition.Test,
-                                          ifTrue:  Visit ( condition.IfTrue  ).MakeNullable ( ),
-                                          ifFalse: Visit ( condition.IfFalse ).MakeNullable ( ) );
-
-        // TODO: Fix support for lambdas
-        if ( node.Operand is LambdaExpression lambda )
+        if ( node.NodeType == ExpressionType.Quote )
             return node;
 
-        return base.VisitUnary ( node );
+        return Visit ( node.Operand );
+    }
+
+    protected override Expression VisitLambda < T > ( Expression < T > node )
+    {
+        return recurseLambda ? base.VisitLambda ( node ) : node;
+    }
+
+    protected override Expression VisitConditional ( ConditionalExpression node )
+    {
+        return node.PropagateNull ( Visit ( node.IfTrue ), Visit ( node.IfFalse ) );
     }
 
     protected override Expression VisitBinary ( BinaryExpression node )
     {
-        if ( node.NodeType == ExpressionType.Coalesce )
-            return Expression.Coalesce ( Visit ( node.Left  ).MakeNullable ( ),
-                                         Visit ( node.Right ).MakeNullable ( ) );
-
-        return base.VisitBinary ( node );
+        return node.PropagateNull ( Visit ( node.Left ), Visit ( node.Right ) );
     }
 
     protected override Expression VisitMember ( MemberExpression node )
     {
-        if ( node.Expression.IsClosure ( ) )
-            return base.VisitMember ( node );
-
         return node.PropagateNull ( Visit ( node.Expression ) );
     }
 
     protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
-        // TODO: Fix support for functions (NodeType == Parameter)
-        if ( node.Object != null && node.Object.NodeType == ExpressionType.Parameter )
-           return node;
-
-        return node.PropagateNull ( Visit ( node.Object ), node.Arguments );
+        return node.PropagateNull ( Visit ( node.Object ), node.Arguments.Select ( Visit ) );
     }
 }
 
@@ -200,8 +190,8 @@ public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
     {
         if ( node.Method.DeclaringType == typeof ( Enumerable ) )
         {
-            var queryableMethod = FindBindableEnumerableMethod ( node.Method );
-            if ( queryableMethod == null )
+            var bindableMethod = FindBindableEnumerableMethod ( node.Method );
+            if ( bindableMethod == null )
                 return base.VisitMethodCall ( node );
 
             if ( Binding != null )
@@ -214,9 +204,9 @@ public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
 
                 arg0 = typeof ( IBindableEnumerable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0, Binding );
 
-                var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Lambda ( a ) : a );
+                var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : a );
 
-                return Expression.Call ( queryableMethod, arguments );
+                return Expression.Call ( bindableMethod, arguments );
             }
             else
             {
@@ -228,9 +218,9 @@ public class EnumerableToBindableEnumerableVisitor : ExpressionVisitor
 
                 arg0 = typeof ( IBindableEnumerable ).IsAssignableFrom ( arg0.Type ) ? arg0 : Expression.Call ( asBindable, arg0 );
 
-                var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : typeof ( Expression ).IsAssignableFrom ( a.Type ) ? Expression.Lambda ( a ) : a );
+                var arguments = node.Arguments.Select ( (a, i) => i == 0 ? arg0 : a );
 
-                return Expression.Call ( queryableMethod, arguments );
+                return Expression.Call ( bindableMethod, arguments );
             }
         }
 
@@ -338,23 +328,6 @@ public class BinderServicesReplacer : ExpressionVisitor
     }
 }
 
-public class BinderServicesReplacerVisitor : ExpressionVisitor
-{
-    private static MethodInfo? invalidates;
-
-    protected override Expression VisitMethodCall ( MethodCallExpression node )
-    {
-        if ( node.Method.DeclaringType == typeof ( BindableEnumerable ) && node.Method.Name == nameof ( BindableEnumerable.AsBindable ) )
-        {
-            invalidates ??= typeof ( BindableEnumerable ).GetMethod ( nameof ( BindableEnumerable.Invalidates ) );
-
-            return Expression.Call ( invalidates.MakeGenericMethod ( node.Method.GetGenericArguments ( ) ), node, Expression.Constant ( node.Arguments [ 0 ] ) );
-        }
-
-        return base.VisitMethodCall ( node );
-    }
-}
-
 public class AwaitableDelayVisitor : ExpressionVisitor
 {
     private static MethodInfo? asDelayed;
@@ -395,7 +368,7 @@ public class TaskResultToAwaitableVisitor : ExpressionVisitor
             var scheduler = (Expression) Expression.Constant ( null, typeof ( IScheduler ) );
 
             if ( right != null )
-                 scheduler = Expression.Call ( schedulerSelector, selectScheduler, Expression.Constant ( right.Body ) );
+                 scheduler = Expression.Call ( schedulerSelector, selectScheduler, Expression.Quote ( right ) );
 
             var cancellationTokenSource = (Expression) Expression.New ( typeof ( CancellationTokenSource ) );
             var cancellationToken       = GetCancellationToken ( task );
