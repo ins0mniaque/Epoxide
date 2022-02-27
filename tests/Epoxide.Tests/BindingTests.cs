@@ -215,6 +215,34 @@ public class BindingTests
         Assert.Equal ( right, -1 );
     }
 
+    [ Fact ]
+    public void Coalesce ( )
+    {
+        var left  = (object?) null;
+        var right = "value";
+
+        Binder.Default.Bind ( ( ) => ( ( left.ToString ( ) ?? null ) ?? "magic" ) + "al" == right );
+
+        Assert.Equal ( right, "magical" );
+
+        Binder.Default.Bind ( ( ) => ( left.ToString ( ) ?? "magic" ) + "al" == right );
+
+        Assert.Equal ( right, "magical" );
+    }
+
+    private double Method ( string arg1, string arg2 ) => 33.0;
+
+    [ Fact ]
+    public void MethodCall ( )
+    {
+        var left  = (object?) null;
+        var right = 0.0;
+
+        Binder.Default.Bind ( ( ) => Method ( left.ToString ( ).ToString ( ).ToString ( ), left.ToString ( ).ToString ( ).ToString ( ) ) == right );
+
+        Assert.Equal ( 0.0, right );
+    }
+
     public class Implicit
     {
         public Implicit ( string value )
@@ -518,7 +546,7 @@ public class BindingTests
     {
         using var cancel = new CancellationTokenSource ( );
 
-        var left  = "";
+        var left = "";
 
         Binder.Default.Bind ( ( ) => left == SafeMethodAsync ( 0, cancel.Token ).Result.ToString ( ).ToString ( ) );
 
@@ -573,6 +601,18 @@ public class BindingTests
         // TODO: Fix double read caused by trigger
         // Assert.Equal ( 2, right );
         Assert.Equal ( 3, right );
+    }
+
+    [ Fact ]
+    public void Model ( )
+    {
+        TestObject left  = null;
+        TestObject right = new TestObject ( );
+
+        Binder.Default.Bind ( right, right => left == right );
+
+        Assert.Equivalent ( left, right );
+        Assert.NotNull    ( left );
     }
 
     public class Button

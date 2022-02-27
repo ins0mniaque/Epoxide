@@ -17,9 +17,22 @@ public static class ExpressionExtensions
         return Expression.Convert ( node, typeof ( Nullable < > ).MakeGenericType ( node.Type ) );
     }
 
+    public static bool CanBeNull ( this Expression node )
+    {
+        // TODO: Handle types that cast non-null to null?
+        var constant = node;
+        while ( constant.NodeType == ExpressionType.Convert )
+            constant = ( (UnaryExpression) constant ).Operand;
+
+        if ( constant.NodeType == ExpressionType.Constant && ( (ConstantExpression) constant ).Value != null )
+            return false;
+
+        return IsNullable ( node ) && ! IsClosure ( node );
+    }
+
     public static bool IsNullable ( this Expression node )
     {
-        return node.Type.IsValueType ? Nullable.GetUnderlyingType ( node.Type ) != null : ! IsClosure ( node );
+        return ! node.Type.IsValueType || Nullable.GetUnderlyingType ( node.Type ) != null;
     }
 
     public static bool IsNullableStruct ( this Expression node )
@@ -62,7 +75,7 @@ public static class ExpressionExtensions
     {
         if ( binary.NodeType == ExpressionType.Coalesce )
         {
-            if ( binary.Left == left && binary.Right == right && left.IsNullable ( ) && right.IsNullable ( ) )
+            if ( binary.Left == left && binary.Right == right && left.CanBeNull ( ) && right.CanBeNull ( ) )
                 return binary;
 
             return Expression.Coalesce ( left .MakeNullable ( ),
@@ -77,7 +90,7 @@ public static class ExpressionExtensions
 
     public static Expression PropagateNull ( this ConditionalExpression condition, Expression ifTrue, Expression ifFalse )
     {
-        if ( condition.IfTrue == ifTrue && condition.IfFalse == ifFalse && ifTrue.IsNullable ( ) && ifFalse.IsNullable ( ) )
+        if ( condition.IfTrue == ifTrue && condition.IfFalse == ifFalse && ifTrue.CanBeNull ( ) && ifFalse.CanBeNull ( ) )
             return condition;
 
         return Expression.Condition ( condition.Test, ifTrue.MakeNullable ( ), ifFalse.MakeNullable ( ) );
@@ -95,7 +108,7 @@ public static class ExpressionExtensions
 
     private static Expression PropagateNullIfNullable ( Expression access, Expression? instance, Expression? propagatedInstance )
     {
-        if ( instance != null && propagatedInstance != null && propagatedInstance.IsNullable ( ) )
+        if ( instance != null && propagatedInstance != null && propagatedInstance.CanBeNull ( ) )
             return PropagateSingleNull ( access, instance, propagatedInstance );
 
         return access;
@@ -106,7 +119,7 @@ public static class ExpressionExtensions
         var instances           = new List < Expression > ( );
         var propagatedInstances = new List < Expression > ( );
 
-        if ( instance != null && propagatedInstance != null && propagatedInstance.IsNullable ( ) )
+        if ( instance != null && propagatedInstance != null && propagatedInstance.CanBeNull ( ) )
         {
             instances          .Add ( instance );
             propagatedInstances.Add ( propagatedInstance );
@@ -120,7 +133,7 @@ public static class ExpressionExtensions
             if ( ! propagatedArgumentsEnumerator.MoveNext ( ) )
                 throw new ArgumentException ( "Less propagated arguments than arguments were provided", nameof ( propagatedArguments ) );
 
-            if ( propagatedArgumentsEnumerator.Current.IsNullable ( ) )
+            if ( propagatedArgumentsEnumerator.Current.CanBeNull ( ) )
             {
                 instances          .Add ( argumentsEnumerator          .Current );
                 propagatedInstances.Add ( propagatedArgumentsEnumerator.Current );
@@ -134,6 +147,8 @@ public static class ExpressionExtensions
 
     private readonly static ConstantExpression Null = Expression.Constant ( null );
 
+    // TODO: Move assigns inside null test and merge blocks
+    // TODO: Handle coalesce by replacing ifTrue constant
     private static Expression PropagateSingleNull ( Expression access, Expression instance, Expression propagatedInstance )
     {
         if ( instance == propagatedInstance )

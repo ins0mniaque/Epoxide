@@ -34,7 +34,7 @@ public class SentinelExpressionTransformer : IExpressionTransformer
         if ( expression.NodeType == ExpressionType.Coalesce && ( (BinaryExpression) expression ).Right is ConstantExpression )
             return expression;
 
-        if ( ! expression.IsNullable ( ) || expression.NodeType == ExpressionType.MemberAccess && ( (MemberExpression) expression ).Expression.IsClosure ( ) )
+        if ( ! expression.CanBeNull ( ) || expression.NodeType == ExpressionType.MemberAccess && ( (MemberExpression) expression ).Expression.IsClosure ( ) )
             return expression;
 
         if ( expression.Type != typeof ( object ) )
@@ -158,6 +158,25 @@ public class ExpressionReplacer : ExpressionVisitor
             return replaced;
 
         return base.Visit ( node );
+    }
+}
+
+public class ReversedExpressionReplacer : ExpressionVisitor
+{
+    private readonly Func < Expression, Expression > replace;
+
+    public ReversedExpressionReplacer ( Func < Expression, Expression > replace )
+    {
+        this.replace = replace;
+    }
+
+    public override Expression Visit ( Expression node )
+    {
+        node = base.Visit ( node );
+        if ( node != null && replace ( node ) is { } replaced && replaced != node )
+            return replaced;
+
+        return node;
     }
 }
 

@@ -56,6 +56,7 @@ public interface IBindingExpression // NOTE: Represents Binding.Side
 
 // public class BindingExpression : IBindingExpression, IExpressionState { }
 
+// TODO: Reuse variables if possible
 public class SchedulableContext
 {
     public static readonly MethodInfo success   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Success ) );
@@ -141,15 +142,79 @@ public static class Schedulable
         return MakeSchedulable ( method, method.Object, @object, method.Arguments, arguments, context );
     }
 
-    // TODO: This needs to replace Fallback ( ) with Success ( coalesce.Value )
     public static Expression AsSchedulable ( this BinaryExpression binary, Expression? left, Expression? right, SchedulableContext context )
     {
+        var isCoalesceToNull = binary.NodeType == ExpressionType.Coalesce &&
+                               right .NodeType == ExpressionType.Constant &&
+                               ( (ConstantExpression) right ).Value == null;
+
+        // TODO: This only removes the first fallback
+        if ( isCoalesceToNull && left.NodeType == ExpressionType.Block )
+        {
+            var replaced = new List < ParameterExpression > ( );
+
+            left = new ExpressionReplacer ( RemoveFallbacks ).Visit ( left );
+
+            Expression RemoveFallbacks ( Expression node )
+            {
+                if ( node.NodeType == ExpressionType.Conditional )
+                {
+                    var condition = (ConditionalExpression) node;
+
+                    if ( condition.IfTrue.NodeType == ExpressionType.Call && ( (MethodCallExpression) condition.IfTrue ).Method == SchedulableContext.fallback )
+                    {
+                        var assign            = ( (BinaryExpression) condition.Test ).Left;
+                        var variable          = (ParameterExpression) ( (BinaryExpression) assign ).Left;
+                        var scheduleCondition = (ConditionalExpression) condition.IfFalse;
+                        var schedule          = (MethodCallExpression)  scheduleCondition.Test;
+
+                        replaced.Add ( variable );
+
+                        // TODO: Bypass schedule call if null
+                        return Expression.Condition ( test:     Expression.Call ( schedule.Object, schedule.Method, assign, schedule.Arguments [ 1 ] ),
+                                                      ifTrue:   scheduleCondition.IfTrue,
+                                                      ifFalse : scheduleCondition.IfFalse );
+                    }
+                }
+
+                return node;
+            }
+
+            left = new ExpressionReplacer ( CoalesceAccess ).Visit ( left );
+
+            Expression CoalesceAccess ( Expression node )
+            {
+                if ( node.NodeType == ExpressionType.MemberAccess )
+                {
+                    var member = (MemberExpression) node;
+                    if ( member.Expression != null && member.Expression.NodeType == ExpressionType.Parameter && replaced.Contains ( member.Expression ) )
+                        return Expression.Condition ( test:    Expression.Equal ( member.Expression, Null ),
+                                                      ifTrue:  node,
+                                                      ifFalse: Expression.Constant ( null, node.Type ) );
+                }
+
+                if ( node.NodeType == ExpressionType.Call )
+                {
+                    var method = (MethodCallExpression) node;
+                    if ( method.Object != null && method.Object.NodeType == ExpressionType.Parameter && replaced.Contains ( method.Object ) )
+                        return Expression.Condition ( test:    Expression.Equal ( method.Object, Null ),
+                                                      ifTrue:  node,
+                                                      ifFalse: Expression.Constant ( null, node.Type ) );
+                }
+
+                return node;
+            }
+        
+            return left;
+        }
+
         return MakeSchedulable ( binary, binary.Left, left, new [ ] { binary.Right }, Enumerable.Repeat ( right, 1 ), context );
     }
 
+    // TODO: Replace IsNullable with IsSchedulable
     private static Expression MakeSchedulable ( Expression access, Expression? instance, Expression? propagatedInstance, SchedulableContext context )
     {
-        if ( instance != null && propagatedInstance != null && ( instance.IsNullable ( ) || propagatedInstance.Type == typeof ( BindingStatus ) ) )
+        if ( instance != null && propagatedInstance != null && ( instance.CanBeNull ( ) || propagatedInstance.Type == typeof ( BindingStatus ) ) )
             return MakeSingleSchedulable ( access, instance, propagatedInstance, context );
 
         return access;
@@ -160,7 +225,7 @@ public static class Schedulable
         var instances           = new List < Expression > ( );
         var propagatedInstances = new List < Expression > ( );
 
-        if ( instance != null && propagatedInstance != null && ( instance.IsNullable ( ) || propagatedInstance.Type == typeof ( BindingStatus ) ) )
+        if ( instance != null && propagatedInstance != null && ( instance.CanBeNull ( ) || propagatedInstance.Type == typeof ( BindingStatus ) ) )
         {
             instances          .Add ( instance );
             propagatedInstances.Add ( propagatedInstance );
@@ -174,7 +239,7 @@ public static class Schedulable
             if ( ! propagatedArgumentsEnumerator.MoveNext ( ) )
                 throw new ArgumentException ( "Less propagated arguments than arguments were provided", nameof ( propagatedArguments ) );
 
-            if ( argumentsEnumerator.Current.IsNullable ( ) || propagatedArgumentsEnumerator.Current.Type == typeof ( BindingStatus ) )
+            if ( argumentsEnumerator.Current.CanBeNull ( ) || propagatedArgumentsEnumerator.Current.Type == typeof ( BindingStatus ) )
             {
                 instances          .Add ( argumentsEnumerator          .Current );
                 propagatedInstances.Add ( propagatedArgumentsEnumerator.Current );
@@ -299,21 +364,19 @@ public static class Schedulable
 
         if ( propagatedInstance.Any ( p => p.NodeType == ExpressionType.Block ) )
         {
-            bool replaced;
+            propagatedInstance = propagatedInstance.Where ( p => p.NodeType == ExpressionType.Block ).ToList ( );
+
             var vars = new List < ParameterExpression > ( );
 
             for ( var index = propagatedInstance.Count - 1; index >= 0; index-- )
             {
-                replaced = false;
-
-                propagatedInstance [ index ] = new ExpressionReplacer ( ReplaceSuccess ).Visit ( propagatedInstance [ index ] );
+                if ( propagatedInstance [ index ].NodeType == ExpressionType.Block )
+                    propagatedInstance [ index ] = new ExpressionReplacer ( ReplaceSuccess ).Visit ( propagatedInstance [ index ] );
 
                 Expression ReplaceSuccess ( Expression node )
                 {
                     if ( node.NodeType == ExpressionType.Call && ((MethodCallExpression) node).Method == SchedulableContext.success )
                     {
-                        replaced = true;
-
                         var result = index + 1 < propagatedInstance.Count ? propagatedInstance [ index + 1 ] : nullTest;
 
                         if ( result.NodeType == ExpressionType.Block )
@@ -328,13 +391,9 @@ public static class Schedulable
 
                         return result;
                     }
-            
+
                     return node;
                 }
-
-                // TODO: Verify this is correct
-                if ( ! replaced )
-                    propagatedInstance [ index ] = index + 1 < propagatedInstance.Count ? propagatedInstance [ index + 1 ] : nullTest;
             }
 
             var block = (BlockExpression) propagatedInstance [ 0 ];
