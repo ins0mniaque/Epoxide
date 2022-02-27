@@ -221,13 +221,15 @@ public class BindingTests
         var left  = (object?) null;
         var right = "value";
 
-        Binder.Default.Bind ( ( ) => ( ( left.ToString ( ) ?? null ) ?? "magic" ) + "al" == right );
+        Binder.Default.Bind ( ( ) => ( ( left.ToString ( ).ToString ( ) ?? null ) ?? "magic" ) + "al" == right );
 
         Assert.Equal ( right, "magical" );
 
-        Binder.Default.Bind ( ( ) => ( left.ToString ( ) ?? "magic" ) + "al" == right );
+        right = "value";
 
-        Assert.Equal ( right, "magical" );
+        Binder.Default.Bind ( ( ) => ( left.ToString ( ).ToString ( ) ?? "magic" ) + "al" == right );
+
+        Assert.Equal ( right, "value" );
     }
 
     private double Method ( string arg1, string arg2 ) => 33.0;

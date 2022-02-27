@@ -56,7 +56,7 @@ public interface IBindingExpression // NOTE: Represents Binding.Side
 
 // public class BindingExpression : IBindingExpression, IExpressionState { }
 
-// TODO: Reuse variables if possible
+// TODO: Reuse variables when expression fingerprint matches
 public class SchedulableContext
 {
     public static readonly MethodInfo success   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Success ) );
@@ -148,12 +148,11 @@ public static class Schedulable
                                right .NodeType == ExpressionType.Constant &&
                                ( (ConstantExpression) right ).Value == null;
 
-        // TODO: This only removes the first fallback
         if ( isCoalesceToNull && left.NodeType == ExpressionType.Block )
         {
             var replaced = new List < ParameterExpression > ( );
 
-            left = new ExpressionReplacer ( RemoveFallbacks ).Visit ( left );
+            left = new ReversedExpressionReplacer ( RemoveFallbacks ).Visit ( left );
 
             Expression RemoveFallbacks ( Expression node )
             {
@@ -164,13 +163,12 @@ public static class Schedulable
                     if ( condition.IfTrue.NodeType == ExpressionType.Call && ( (MethodCallExpression) condition.IfTrue ).Method == SchedulableContext.fallback )
                     {
                         var assign            = ( (BinaryExpression) condition.Test ).Left;
-                        var variable          = (ParameterExpression) ( (BinaryExpression) assign ).Left;
+                        var variable          = assign.NodeType == ExpressionType.Parameter ? (ParameterExpression) assign : (ParameterExpression) ( (BinaryExpression) assign ).Left;
                         var scheduleCondition = (ConditionalExpression) condition.IfFalse;
                         var schedule          = (MethodCallExpression)  scheduleCondition.Test;
 
                         replaced.Add ( variable );
 
-                        // TODO: Bypass schedule call if null
                         return Expression.Condition ( test:     Expression.Call ( schedule.Object, schedule.Method, assign, schedule.Arguments [ 1 ] ),
                                                       ifTrue:   scheduleCondition.IfTrue,
                                                       ifFalse : scheduleCondition.IfFalse );
@@ -180,6 +178,7 @@ public static class Schedulable
                 return node;
             }
 
+            // TODO: This needs force type change with MakeNullable, and RemoveNullable at usage
             left = new ExpressionReplacer ( CoalesceAccess ).Visit ( left );
 
             Expression CoalesceAccess ( Expression node )
