@@ -25,16 +25,12 @@ public interface IExpressionState
     bool Read  < T > ( int id, [ MaybeNullWhen ( true ) ] out T value );
     T    Write < T > ( int id, T value );
 
-    bool Schedule ( object? instance, MemberInfo member );
-    bool WaitFor  ( int id, object? value ); // Rename IsAsync? Remove object so it's not typed?
-    // bool WaitFor  ( int id, object? value, int id2, object? value2 );
-    // Etc...
-    bool WaitFor  ( int [ ] ids, object? [ ] values );
+    bool Schedule < T > ( T instance, MemberInfo member );
+    bool WaitFor  < T > ( int id, T value ); // Rename IsAsync? IsAsyncValue?
 
-    // TODO: Typed Success?
-    BindingStatus Fallback  ( );
-    BindingStatus Success   ( object? value ); // TODO: Rename... Result? SetResult?
-    BindingStatus Exception ( ExceptionDispatchInfo exception );
+    BindingStatus Fallback     ( );
+    BindingStatus Exception    ( ExceptionDispatchInfo exception );
+    BindingStatus Result < T > ( T value );
 }
 
 // TODO: Rename not status...
@@ -59,11 +55,11 @@ public interface IBindingExpression // NOTE: Represents Binding.Side
 // TODO: Reuse variables when expression fingerprint matches
 public class SchedulableContext
 {
-    public static readonly MethodInfo success   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Success ) );
+    public static readonly MethodInfo result   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Result ) );
     public static readonly MethodInfo fallback  = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Fallback ) );
     public static readonly MethodInfo exception2 = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Exception ) );
     public static readonly MethodInfo schedule  = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Schedule ) );
-    public static readonly MethodInfo waitFor   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.WaitFor ), new [ ] { typeof ( int ), typeof ( object ) } );
+    public static readonly MethodInfo waitFor   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.WaitFor ) );
     public static readonly MethodInfo read      = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Read ) );
     public static readonly MethodInfo write     = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Write ) );
 
@@ -105,27 +101,19 @@ public class SchedulableContext
         return Expression.Call ( State, exception2, exception );
     }
 
-    public Expression Success ( Expression value )
+    public Expression Result ( Expression value )
     {
-        // TODO: Typed result
-        return Expression.Call ( State, success, Box ( value ) );
+        return Expression.Call ( State, result.MakeGenericMethod ( value.Type ), value );
     }
 
     public Expression Schedule ( Expression expression, MemberInfo member )
     {
-        // TODO: Typed result
-        return Expression.Call ( State, schedule, Box ( expression ), Expression.Constant ( member, typeof ( MemberInfo ) ) );
+        return Expression.Call ( State, schedule.MakeGenericMethod ( expression.Type ), expression, Expression.Constant ( member, typeof ( MemberInfo ) ) );
     }
 
     public Expression WaitFor ( int id, Expression expression )
     {
-        // TODO: Typed result or remove object argument
-        return Expression.Call ( State, waitFor, Expression.Constant ( id ), Box ( expression ) );
-    }
-
-    private static Expression Box ( Expression expression )
-    {
-        return expression.Type.IsValueType ? Expression.Convert ( expression, typeof ( object ) ) : expression;
+        return Expression.Call ( State, waitFor.MakeGenericMethod ( expression.Type ), Expression.Constant ( id ), expression );
     }
 }
     
@@ -276,7 +264,7 @@ public static class Schedulable
 
         var waitFor   = Expression.Condition ( test:    context.WaitFor  ( accessedId, assignAccess ),
                                                ifTrue:  Expression.Constant ( BindingStatus.Wait ),
-                                               ifFalse: context.Success  ( accessed ) );
+                                               ifFalse: context.Result  ( accessed ) );
 
         var member    = GetAccessedMember ( access );
         var schedule  = Expression.Condition ( test:    context.Schedule  ( variable, member ),
@@ -290,11 +278,11 @@ public static class Schedulable
 
         if ( propagated )
         {
-            var block = (BlockExpression) new ExpressionReplacer ( ReplaceSuccess ).Visit ( propagatedInstance );
+            var block = (BlockExpression) new ExpressionReplacer ( ReplaceResult ).Visit ( propagatedInstance );
 
-            Expression ReplaceSuccess ( Expression node )
+            Expression ReplaceResult ( Expression node )
             {
-                if ( node.NodeType == ExpressionType.Call && ((MethodCallExpression) node).Method == SchedulableContext.success )
+                if ( node.NodeType == ExpressionType.Call && ((MethodCallExpression) node).Method.IsGenericMethod && ((MethodCallExpression) node).Method.GetGenericMethodDefinition ( ) == SchedulableContext.result )
                     return nullTest;
 
                 return node;
@@ -347,7 +335,7 @@ public static class Schedulable
 
         var waitFor   = Expression.Condition ( test:    context.WaitFor  ( accessedId, assignAccess ),
                                                ifTrue:  Expression.Constant ( BindingStatus.Wait ),
-                                               ifFalse: context.Success  ( accessed ) );
+                                               ifFalse: context.Result  ( accessed ) );
 
         var member    = GetAccessedMember ( access );
         var schedule  = Expression.Condition ( test:    variables.Select    ( variable => context.Schedule  ( variable, member ) )
@@ -361,6 +349,7 @@ public static class Schedulable
                                                ifTrue:  context.Fallback ( ),
                                                ifFalse: schedule );
 
+        // TODO: Fix WaitFor calls to use bitwise Or like Schedule
         if ( propagatedInstance.Any ( p => p.NodeType == ExpressionType.Block ) )
         {
             propagatedInstance = propagatedInstance.Where ( p => p.NodeType == ExpressionType.Block ).ToList ( );
@@ -370,11 +359,11 @@ public static class Schedulable
             for ( var index = propagatedInstance.Count - 1; index >= 0; index-- )
             {
                 if ( propagatedInstance [ index ].NodeType == ExpressionType.Block )
-                    propagatedInstance [ index ] = new ExpressionReplacer ( ReplaceSuccess ).Visit ( propagatedInstance [ index ] );
+                    propagatedInstance [ index ] = new ExpressionReplacer ( ReplaceResult ).Visit ( propagatedInstance [ index ] );
 
-                Expression ReplaceSuccess ( Expression node )
+                Expression ReplaceResult ( Expression node )
                 {
-                    if ( node.NodeType == ExpressionType.Call && ((MethodCallExpression) node).Method == SchedulableContext.success )
+                    if ( node.NodeType == ExpressionType.Call && ((MethodCallExpression) node).Method.IsGenericMethod && ((MethodCallExpression) node).Method.GetGenericMethodDefinition ( ) == SchedulableContext.result )
                     {
                         var result = index + 1 < propagatedInstance.Count ? propagatedInstance [ index + 1 ] : nullTest;
 
