@@ -83,29 +83,25 @@ public class SchedulableVisitor : ExpressionVisitor
         return recurseLambda ? base.VisitLambda ( node ) : node;
     }
 
+    // TODO: Verify if something is needed here
     protected override Expression VisitConditional ( ConditionalExpression node )
     {
-        return node.PropagateNull ( Visit ( node.IfTrue ), Visit ( node.IfFalse ) );
+        return base.VisitConditional ( node );
     }
 
     protected override Expression VisitBinary ( BinaryExpression node )
     {
-        // TODO: This needs to replace Fallback ( ) with Success ( coalesce.Value )
-        return node.PropagateNull ( Visit ( node.Left ), Visit ( node.Right ) );
+        return node.AsSchedulable ( Visit ( node.Left ), Visit ( node.Right ), context );
     }
 
     protected override Expression VisitMember ( MemberExpression node )
     {
-        var visited = Visit ( node.Expression );
-
-        return node.AsSchedulable ( visited, context );
+        return node.AsSchedulable ( Visit ( node.Expression ), context );
     }
 
     protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
-        var visited = Visit ( node.Object );
-
-        return node.AsSchedulable ( visited, node.Arguments.Select ( Visit ), context );
+        return node.AsSchedulable ( Visit ( node.Object ), node.Arguments.Select ( Visit ), context );
     }
 }
 
