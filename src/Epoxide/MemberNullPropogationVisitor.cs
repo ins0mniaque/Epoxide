@@ -30,7 +30,6 @@ public class SentinelExpressionTransformer : IExpressionTransformer
         expression = awaitableTaskVisitor  .Visit ( expression );
         expression = awaitableDelayVisitor .Visit ( expression );
         expression = nullPropagationVisitor.Visit ( expression );
-        // expression = new SchedulableVisitor ( ).Visit ( expression );
 
         if ( expression.NodeType == ExpressionType.Coalesce && ( (BinaryExpression) expression ).Right is ConstantExpression )
             return expression;
@@ -51,17 +50,32 @@ public class SchedulableVisitor : ExpressionVisitor
     bool recurseLambda = false;
     SchedulableContext context = new ( );
 
+    bool first = true;
+
+    public override Expression Visit ( Expression node )
+    {
+        if ( first )
+        {
+            first = false;
+            if ( node.NodeType != ExpressionType.Lambda )
+                throw new ArgumentException ( "Expression needs to be a LambdaExpression", nameof ( node ) );
+
+            var lambda = (LambdaExpression) node;
+
+            node = Visit ( lambda.Body );
+
+            return Expression.Lambda ( node, lambda.Parameters.Append ( context.State ) );
+        }
+
+        return base.Visit ( node );
+    }
+
     protected override Expression VisitUnary ( UnaryExpression node )
     {
         if ( node.NodeType == ExpressionType.Quote )
             return node;
 
         return Visit ( node.Operand );
-    }
-
-    protected override Expression VisitParameter ( ParameterExpression node )
-    {
-        return node.AsSchedulable ( context );
     }
 
     protected override Expression VisitLambda < T > ( Expression < T > node )
@@ -76,17 +90,22 @@ public class SchedulableVisitor : ExpressionVisitor
 
     protected override Expression VisitBinary ( BinaryExpression node )
     {
+        // TODO: This needs to replace Fallback ( ) with Success ( coalesce.Value )
         return node.PropagateNull ( Visit ( node.Left ), Visit ( node.Right ) );
     }
 
     protected override Expression VisitMember ( MemberExpression node )
     {
-        return node.AsSchedulable ( Visit ( node.Expression ), context );
+        var visited = Visit ( node.Expression );
+
+        return node.AsSchedulable ( visited, context );
     }
 
     protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
-        return node.AsSchedulable ( Visit ( node.Object ), node.Arguments.Select ( Visit ), context );
+        var visited = Visit ( node.Object );
+
+        return node.AsSchedulable ( visited, node.Arguments.Select ( Visit ), context );
     }
 }
 

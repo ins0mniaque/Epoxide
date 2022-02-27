@@ -2,11 +2,29 @@
 
 namespace Epoxide.Linq.Expressions;
 
-// TODO: Rename something without machine...
-public interface IStateMachine
+public static class StateMachine 
 {
-    bool Read  ( int id, out object? value );
-    void Write ( int id, object? value );
+    public static BindingStatus MoveNext < TSource > ( this Func < TSource, IExpressionState, BindingStatus > compiled, IExpressionState state )
+    {
+        try
+        {
+            return compiled ( default, state );
+        }
+        catch ( Exception exception )
+        {
+            state.Exception ( BindingException.Capture ( exception ) );
+
+            return BindingStatus.Exception;
+        }
+    }
+}
+
+// TODO: This needs to be disposable? Yes.
+// TODO: Needs a way to tell state machine the state changed?
+public interface IExpressionState
+{
+    bool    Read  ( int id, out object? value );
+    object? Write ( int id, object? value );
 
     bool Schedule ( object? instance, MemberInfo member );
     bool WaitFor  ( int id, object? value );
@@ -15,7 +33,7 @@ public interface IStateMachine
     bool WaitFor  ( int [ ] ids, object? [ ] values );
 
     BindingStatus Fallback  ( );
-    BindingStatus Success   ( object? value ); // Rename?
+    BindingStatus Success   ( object? value ); // TODO: Rename
     BindingStatus Exception ( ExceptionDispatchInfo exception );
 }
 
@@ -36,7 +54,7 @@ public interface IBindingExpression // NOTE: Represents Binding.Side
     IBinderServices Services { get; }
 }
 
-public class BindingExpression : IBindingExpression, IStateMachine
+public class BindingExpression : IBindingExpression, IExpressionState
 {
     public IBinderServices Services => throw new NotImplementedException ( );
 
@@ -47,26 +65,40 @@ public class BindingExpression : IBindingExpression, IStateMachine
     public BindingStatus Success ( object? value ) => throw new NotImplementedException ( );
     public bool WaitFor ( int id, object? value ) => throw new NotImplementedException ( );
     public bool WaitFor ( int [ ] ids, object? [ ] values ) => throw new NotImplementedException ( );
-    public void Write ( int id, object? value ) => throw new NotImplementedException ( );
+    public object? Write ( int id, object? value ) => throw new NotImplementedException ( );
 }
 
 public class SchedulableContext
 {
-    public static readonly MethodInfo success   = typeof ( IStateMachine ).GetMethod ( nameof ( IStateMachine.Success ) );
-    public static readonly MethodInfo fallback  = typeof ( IStateMachine ).GetMethod ( nameof ( IStateMachine.Fallback ) );
-    public static readonly MethodInfo exception2 = typeof ( IStateMachine ).GetMethod ( nameof ( IStateMachine.Exception ) );
-    public static readonly MethodInfo schedule  = typeof ( IStateMachine ).GetMethod ( nameof ( IStateMachine.Schedule ) );
-    public static readonly MethodInfo waitFor   = typeof ( IStateMachine ).GetMethod ( nameof ( IStateMachine.WaitFor ), new [ ] { typeof ( int ), typeof ( object ) } );
+    public static readonly MethodInfo success   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Success ) );
+    public static readonly MethodInfo fallback  = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Fallback ) );
+    public static readonly MethodInfo exception2 = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Exception ) );
+    public static readonly MethodInfo schedule  = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Schedule ) );
+    public static readonly MethodInfo waitFor   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.WaitFor ), new [ ] { typeof ( int ), typeof ( object ) } );
+    public static readonly MethodInfo read      = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Read ) );
+    public static readonly MethodInfo write     = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Write ) );
 
-    private int id = 0;
-    public ParameterExpression State { get; } = Expression.Parameter ( typeof ( IStateMachine ), "state" );
-    public int GetNextId ( ) => id++;
+    public ParameterExpression State { get; } = Expression.Parameter ( typeof ( IExpressionState ), "state" );
 
-    private HashSet < ParameterExpression > parameters = new ( );
+    private Dictionary < ParameterExpression, int > variables = new Dictionary<ParameterExpression, int> ( );
 
-    public void AddParameter ( ParameterExpression parameter )
+    public int GetId ( ParameterExpression variable )
     {
-        parameters.Add ( parameter );
+        if ( ! variables.TryGetValue ( variable, out var id ) )
+            variables [ variable ] = id = variables.Count;
+
+        return id;
+    }
+
+    public Expression Assign ( int id, ParameterExpression variable, Expression value )
+    {
+        var readValue  = Expression.Call ( State, read, Expression.Constant ( id ), variable );
+        var writeValue = Expression.Call ( State, write, Expression.Constant ( id ), value );
+
+        // TODO: Replace convert with typed Read/Write
+        return Expression.Condition ( test: readValue,
+            ifTrue: variable,
+            ifFalse: Expression.Convert ( writeValue, variable.Type ) );
     }
 
     public Expression Fallback ( )
@@ -89,22 +121,15 @@ public class SchedulableContext
         return Expression.Call ( State, schedule, expression, Expression.Constant ( member ) );
     }
 
-    public Expression WaitFor ( int index, Expression expression )
+    public Expression WaitFor ( int id, Expression expression )
     {
-        return Expression.Call ( State, waitFor, Expression.Constant ( index ), expression );
+        return Expression.Call ( State, waitFor, Expression.Constant ( id ), expression );
     }
 }
     
 // TODO: Rename Binding something? or Schedulable.ToScheduled
 public static class Schedulable
 {
-    public static Expression AsSchedulable ( this ParameterExpression parameter, SchedulableContext context )
-    {
-        context.AddParameter ( parameter );
-
-        return parameter;
-    }
-
     public static Expression AsSchedulable ( this MemberExpression member, Expression? expression, SchedulableContext context )
     {
         return MakeSchedulable ( member, member.Expression, expression, context );
@@ -157,13 +182,12 @@ public static class Schedulable
     private readonly static ConstantExpression Null = Expression.Constant ( null );
 
     // TODO: Handle exceptions
-    // TODO: Use binding state (TryGetValue/SetValue)
     private static Expression MakeSingleSchedulable ( Expression access, Expression instance, Expression propagatedInstance, SchedulableContext context )
     {
-        var id         = context.GetNextId ( );
         var propagated = propagatedInstance.NodeType == ExpressionType.Block;
         var variable   = propagated ? ( (BlockExpression) propagatedInstance ).Variables.LastOrDefault ( ) :
                                       Expression.Variable ( instance.Type, GenerateVariableName ( instance, propagatedInstance, context ) );
+        var id         = context.GetId ( variable );
 
         access = new ExpressionReplacer ( ReplaceInstance ).Visit ( access ).MakeNullable ( );
 
@@ -176,9 +200,10 @@ public static class Schedulable
         }
 
         var accessed     = Expression.Variable ( access.Type, GenerateVariableName ( access, propagatedInstance, context ) );
-        var assignAccess = Expression.Assign   ( accessed, access );
+        var accessedId   = context.GetId ( accessed );
+        var assignAccess = Expression.Assign   ( accessed, context.Assign ( accessedId, accessed, access ) );
 
-        var waitFor   = Expression.Condition ( test:    context.WaitFor  ( id, assignAccess ),
+        var waitFor   = Expression.Condition ( test:    context.WaitFor  ( accessedId, assignAccess ),
                                                ifTrue:  Expression.Constant ( BindingStatus.Wait ),
                                                ifFalse: context.Success  ( accessed ) );
 
@@ -216,7 +241,7 @@ public static class Schedulable
                                   variables:   new [ ] { variable, accessed },
                                   expressions: new Expression [ ]
                                   {
-                                      Expression.Assign ( variable, instance ),
+                                      Expression.Assign ( variable, context.Assign ( id, variable, instance ) ),
                                       nullTest
                                   } );
     }
