@@ -66,7 +66,8 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
 
             node = Visit ( lambda.Body );
 
-            // TODO: Generate try/catch
+            node = node.MakeStateMachine                 ( context );
+            node = node.AddStateMachineExceptionHandling ( context );
 
             return Expression.Lambda ( node, lambda.Parameters.Prepend ( context.Store ).Prepend ( context.Machine ) );
         }

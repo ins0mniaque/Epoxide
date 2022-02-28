@@ -119,7 +119,10 @@ public class ExpressionStateMachineBuilderContext
 
     public Expression SetException ( Expression exception )
     {
-        return Expression.Call ( Machine, exception2, exception );
+        // TODO: Static
+        var capture = typeof ( BindingException ).GetMethod ( nameof ( BindingException.Capture ) );
+
+        return Expression.Call ( Machine, exception2, Expression.Call ( capture, exception ) );
     }
 
     public Expression SetResult ( Expression value )
@@ -140,6 +143,24 @@ public class ExpressionStateMachineBuilderContext
 
 public static class StateMachineBuilder
 {
+    public static Expression MakeStateMachine ( this Expression expression, ExpressionStateMachineBuilderContext context )
+    {
+        if ( expression.Type == typeof ( ExpressionState ) )
+            return expression;
+
+        return Expression.Condition ( test:    context.Await ( -1, expression ),
+                                      ifTrue:  Expression.Constant ( ExpressionState.Wait ),
+                                      ifFalse: context.SetResult ( expression ) );
+    }
+
+    public static Expression AddStateMachineExceptionHandling ( this Expression expression, ExpressionStateMachineBuilderContext context )
+    {
+        var exception  = Expression.Parameter ( typeof ( Exception ), "exception" );
+        var catchBlock = Expression.Catch     ( exception, context.SetException ( exception ) );
+
+        return Expression.TryCatch ( expression, catchBlock );
+    }
+
     public static Expression ToStateMachine ( this MemberExpression member, Expression? expression, ExpressionStateMachineBuilderContext context )
     {
         return MakeSchedulable ( member, member.Expression, expression, context );
