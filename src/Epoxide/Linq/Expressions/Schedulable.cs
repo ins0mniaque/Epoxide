@@ -1,7 +1,10 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 
+using Epoxide.Disposables;
+
 namespace Epoxide.Linq.Expressions;
+
 
 // TODO: If multiple scheduler are required by multiple Schedule call,
 //       schedule them all...
@@ -29,48 +32,102 @@ public enum ExpressionState
     Awaiting
 }
 
-// TODO: Need TState?
-// TODO: Need interface with IBindableEnumerable
-public interface IBindingExpression < TSource > : IDisposable // NOTE: Represents Binding.Side
+public interface IExpressionStateMachineStore : IExpressionStateMachine
 {
-    // LambdaExpression Expression    { get; }
-    // bool             IsCollection  { get; }
-    // bool             IsWritable    { get; }
-    // bool             IsWriteActive { get; }
-
-    // ExpressionState State { get; }
-    // void Bind   ( ); // Starts state machine
-    // void Unbind ( ); // Clear container and store
-
-    // void Read  < TState > ( TSource source, TState state,                ExpressionAccessCallback < TSource, TState, ExpressionReadResult  > callback );
-    // void Write < TState > ( TSource source, TState state, object? value, ExpressionAccessCallback < TSource, TState, ExpressionWriteResult > callback );
-}
-
-public interface IExpressionStateMachineStore
-{
-    IExpressionStateMachine StateMachine { get; init; }
+    void SetStateMachine ( IExpressionStateMachine stateMachine );
 
     bool Get   ( int id, [ MaybeNullWhen ( true ) ] out object? value );
     void Set   ( int id, object? value );
     void Clear ( int id );
 }
 
+public class ExpressionStateMachineStore : IExpressionStateMachineStore
+{
+    private IExpressionStateMachine stateMachine;
+
+    private readonly object? [ ] vars;
+    private readonly bool    [ ] hass;
+
+    public ExpressionStateMachineStore ( int capacity )
+    {
+        vars = new object? [ capacity ];
+        hass = new bool    [ capacity ];
+    }
+
+    // TODO: Verify this was set
+    public void SetStateMachine ( IExpressionStateMachine stateMachine )
+    {
+        stateMachine = stateMachine;
+    }
+
+    public bool Get<T> ( int id, [MaybeNullWhen ( true )] out T value )
+    {
+        if ( hass [ id ] )
+        {
+            value = (T) vars [ id ];
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    public T Set<T> ( int id, T value )
+    {
+        vars [ id ] = value;
+        hass [ id ] = true;
+
+        return value;
+    }
+
+    public bool Get ( int id, [MaybeNullWhen ( true )] out object? value )
+    {
+        if ( hass [ id ] )
+        {
+            value = vars [ id ];
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    public void Set ( int id, object? value )
+    {
+        vars [ id ] = value;
+        hass [ id ] = true;
+    }
+
+    public void Clear ( int id )
+    {
+        vars [ id ] = null;
+        hass [ id ] = false;
+    }
+
+    public bool Schedule<T> ( int id, T instance, MemberInfo member ) => stateMachine.Schedule ( id, instance, member );
+    public bool Await<T> ( int id, T value ) => stateMachine.Await ( id, value );
+    public ExpressionState SetException ( ExceptionDispatchInfo exception ) => stateMachine.SetException ( exception );
+    public ExpressionState SetResult<T> ( T value ) => stateMachine.SetResult ( value );
+}
+
 // TODO: Replace state with typed state visitor
 // TODO: Automatically generate the stores 
-public struct ExpressionStateMachineStore < T0 > : IExpressionStateMachine, IExpressionStateMachineStore
+public struct ExpressionStateMachineStore < T0 > : IExpressionStateMachineStore
 {
-    public IExpressionStateMachine StateMachine { get; init; }
+    private IExpressionStateMachine stateMachine;
 
     // TODO: public?
     bool has0;
     T0   var0;
 
+    // TODO: Verify this was set
+    public void SetStateMachine ( IExpressionStateMachine stateMachine )
+    {
+        stateMachine = stateMachine;
+    }
+
     public bool Get<T> ( int id, [MaybeNullWhen ( true )] out T value ) => throw new NotSupportedException ( );
     public T Set<T> ( int id, T value ) => throw new NotSupportedException ( );
-    public bool Await<T> ( int id, T value ) => StateMachine.Await ( id, value );
-    public bool Schedule<T> ( int id, T instance, MemberInfo member ) => StateMachine.Schedule ( id, instance, member );
-    public ExpressionState SetException ( ExceptionDispatchInfo exception ) => StateMachine.SetException ( exception );
-    public ExpressionState SetResult<T> ( T value ) => StateMachine.SetResult ( value );
 
     public bool Get ( int id, [ MaybeNullWhen ( true ) ] out object? value )
     {
@@ -96,10 +153,75 @@ public struct ExpressionStateMachineStore < T0 > : IExpressionStateMachine, IExp
             case 0: var0 = default; has0 = false; break;
         }
     }
+
+    public bool Schedule<T> ( int id, T instance, MemberInfo member ) => stateMachine.Schedule ( id, instance, member );
+    public bool Await<T> ( int id, T value ) => stateMachine.Await ( id, value );
+    public ExpressionState SetException ( ExceptionDispatchInfo exception ) => stateMachine.SetException ( exception );
+    public ExpressionState SetResult<T> ( T value ) => stateMachine.SetResult ( value );
 }
 
-public sealed class BindingExpression < TSource > : IBindingExpression < TSource >
+// TODO: Need TState?
+// TODO: Need interface with IBindableEnumerable
+public interface IBindingExpression < TSource, TValue > : IDisposable // NOTE: Represents Binding.Side
 {
+    // LambdaExpression Expression    { get; }
+    // bool             IsCollection  { get; }
+    // bool             IsWritable    { get; }
+    // bool             IsWriteActive { get; }
+
+    // ExpressionState State { get; }
+    // void Bind   ( ); // Starts state machine
+    // void Unbind ( ); // Clear container and store
+
+    // void Read  < TState > ( TSource source, TState state,                ExpressionAccessCallback < TSource, TState, ExpressionReadResult  > callback );
+    // void Write < TState > ( TSource source, TState state, object? value, ExpressionAccessCallback < TSource, TState, ExpressionWriteResult > callback );
+}
+
+public static class BindingExpression
+{
+    public static IBindingExpression < TSource, TValue > Create < TSource, TValue > ( LambdaExpression expression )
+    {
+        if ( expression.Body.Type != typeof ( TValue ) )
+            expression = Expression.Lambda < Func < TSource, TValue > > ( Expression.Convert ( expression.Body, typeof ( TValue ) ), expression.Parameters );
+
+        return Create ( (Expression < Func < TSource, TValue > >) expression );
+    }
+
+    public static IBindingExpression < TSource, TValue > Create < TSource, TValue > ( Expression < Func < TSource, TValue > > expression )
+    {
+        var visitor       = new ExpressionStateMachineBuilderVisitor ( );
+        var stateMachined = (Expression < Func < IExpressionStateMachine, TSource, ExpressionState > >) visitor.Visit ( expression );
+
+        // TODO: Create appropriate ExpressionStateMachineStore < > if variables.Count is low enough
+        //       and convert expression
+        var variables = visitor.Context.Variables;
+        var store     = new ExpressionStateMachineStore ( variables.Count );
+
+        // TODO: Embed source in machine to have a single argument and
+        //       allow MoveNext ( ) on IExpressionStateMachine.
+        // var moveNext = CachedExpressionCompiler.Compile ( stateMachined );
+        var moveNext = stateMachined.Compile ( );
+
+        return new BindingExpression < ExpressionStateMachineStore, TSource, TValue > ( store, moveNext );
+    }
+}
+
+public sealed class BindingExpression < TStateMachineStore, TSource, TValue > : IBindingExpression < TSource, TValue >, IExpressionStateMachine
+    where TStateMachineStore : IExpressionStateMachineStore
+{
+    private readonly TStateMachineStore  store;
+    private readonly Func < TStateMachineStore, TSource, ExpressionState > moveNext;
+    private readonly CompositeDisposable disposables;
+
+    public BindingExpression ( TStateMachineStore store, Func < TStateMachineStore, TSource, ExpressionState > moveNext )
+    {
+        this.store = store;
+        this.disposables = new ( );
+        this.moveNext = moveNext;
+
+        store.SetStateMachine ( this );
+    }
+
     // Needs Read/Write like accessor
     // Schedule: ISchedulerSelector, then schedule read and add to container, also hook member, to container.
     // Await: IAsyncValue: ... container.
@@ -111,19 +233,62 @@ public sealed class BindingExpression < TSource > : IBindingExpression < TSource
 
     // IExpressionStateMachine Store => Wrapper over itself with store separated
 
-    // TODO: Dispose container
-    public void Dispose ( ) { }
+    public bool SetValue ( object? value )
+    {
+        // TODO: If active and writable
+        return false;
+    }
+
+    public void Bind ( TSource source )
+    {
+        // TODO: Start machine: receive BindingStatus
+        //       If Scheduled: unqueue schedule call, and move next
+        //       If Await: schedule, and move next on callback
+        //       If Exception: handle event, and restart if handled 
+        //       If result: event, wait
+        //       If fallback: wait
+    }
+
+    // TODO: Explicit
+    public bool Get<T> ( int id, [MaybeNullWhen ( true )] out T value ) => store.Get ( id, out value );
+    public T Set<T> ( int id, T value ) => store.Set < T > ( id, value );
+
+    public bool Await<T> ( int id, T value )
+    {
+        return false;
+    }
+
+    public bool Schedule<T> ( int id, T instance, MemberInfo member )
+    {
+        return false;
+    }
+
+    public ExpressionState SetException ( ExceptionDispatchInfo exception )
+    {
+        return ExpressionState.Error;
+    }
+
+    public ExpressionState SetResult<T> ( T value )
+    {
+        return ExpressionState.Active;
+    }
+
+    public void Dispose ( )
+    {
+        disposables.Dispose ( );
+    }
 }
 
 // TODO: Reuse variables when expression fingerprint matches
+// TODO: Rename
 public class ExpressionStateMachineBuilderContext
 {
-    public static readonly MethodInfo result   = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.SetResult ) );
+    public static readonly MethodInfo result     = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.SetResult ) );
     public static readonly MethodInfo exception2 = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.SetException ) );
-    public static readonly MethodInfo schedule  = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Schedule ) );
-    public static readonly MethodInfo waitFor   = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Await ) );
-    public static readonly MethodInfo read      = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Get ) );
-    public static readonly MethodInfo write     = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Set ) );
+    public static readonly MethodInfo schedule   = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Schedule ) );
+    public static readonly MethodInfo waitFor    = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Await ) );
+    public static readonly MethodInfo read       = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Get ) );
+    public static readonly MethodInfo write      = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Set ) );
 
     public ParameterExpression StateMachine { get; } = Expression.Parameter ( typeof ( IExpressionStateMachine ), "λ" );
 

@@ -48,9 +48,9 @@ public class SentinelExpressionTransformer : IExpressionTransformer
 public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
 {
     bool recurseLambda = false;
-    ExpressionStateMachineBuilderContext context = new ( );
+    bool first         = true;
 
-    bool first = true;
+    public ExpressionStateMachineBuilderContext Context { get; } = new ( );
 
     public override Expression Visit ( Expression node )
     {
@@ -62,14 +62,14 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
 
             var lambda = (LambdaExpression) node;
 
-            context.WritableExpression = lambda.Body.ToWritable ( );
+            Context.WritableExpression = lambda.Body.ToWritable ( );
 
             node = Visit ( lambda.Body );
 
-            node = node.MakeStateMachine                 ( context );
-            node = node.AddStateMachineExceptionHandling ( context );
+            node = node.MakeStateMachine                 ( Context );
+            node = node.AddStateMachineExceptionHandling ( Context );
 
-            return Expression.Lambda ( node, lambda.Parameters.Prepend ( context.StateMachine ) );
+            return Expression.Lambda ( node, lambda.Parameters.Prepend ( Context.StateMachine ) );
         }
 
         return base.Visit ( node );
@@ -97,17 +97,17 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
 
     protected override Expression VisitBinary ( BinaryExpression node )
     {
-        return node.ToStateMachine ( Visit ( node.Left ), Visit ( node.Right ), context );
+        return node.ToStateMachine ( Visit ( node.Left ), Visit ( node.Right ), Context );
     }
 
     protected override Expression VisitMember ( MemberExpression node )
     {
-        return node.ToStateMachine ( Visit ( node.Expression ), context );
+        return node.ToStateMachine ( Visit ( node.Expression ), Context );
     }
 
     protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
-        return node.ToStateMachine ( Visit ( node.Object ), node.Arguments.Select ( Visit ), context );
+        return node.ToStateMachine ( Visit ( node.Object ), node.Arguments.Select ( Visit ), Context );
     }
 }
 
