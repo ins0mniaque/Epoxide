@@ -284,7 +284,7 @@ public static class Schedulable
     {
         var propagated = propagatedInstance.NodeType == ExpressionType.Block;
         var variable   = propagated ? ( (BlockExpression) propagatedInstance ).Variables.LastOrDefault ( ) :
-                                      Expression.Variable ( instance.Type, GenerateVariableName ( instance, context ) );
+                                      instance.GenerateVariable ( context.Variables.Keys );
         var id         = context.GetId ( variable );
 
         access = new ExpressionReplacer ( ReplaceInstance ).Visit ( access ).MakeNullable ( );
@@ -297,7 +297,7 @@ public static class Schedulable
             return node;
         }
 
-        var accessed     = Expression.Variable ( access.Type, GenerateVariableName ( access, context ) );
+        var accessed     = access.GenerateVariable ( context.Variables.Keys );
         var accessedId   = context.GetId ( accessed );
         var assignAccess = Expression.Assign   ( accessed, context.Assign ( accessedId, accessed, access ) );
 
@@ -367,7 +367,7 @@ public static class Schedulable
             // TODO: Remove multiple array accesses
             var propagated = propagatedInstance [ index ].NodeType == ExpressionType.Block;
             var variable   = propagated ? ( (BlockExpression) propagatedInstance [ index ] ).Variables.LastOrDefault ( ) :
-                                          Expression.Variable ( instance [ index ].Type, GenerateVariableName ( instance [ index ], context ) );
+                                          instance [ index ].GenerateVariable ( context.Variables.Keys );
 
             variables [ index ] = variable;
         }
@@ -383,7 +383,7 @@ public static class Schedulable
             return node;
         }
 
-        var accessed     = Expression.Variable ( access.Type, GenerateVariableName ( access, context ) );
+        var accessed     = access.GenerateVariable ( context.Variables.Keys );
         var accessedId   = context.GetId ( accessed );
         var assignAccess = Expression.Assign   ( accessed, context.Assign ( accessedId, accessed, access ) );
 
@@ -463,21 +463,5 @@ public static class Schedulable
                access.NodeType == ExpressionType.Call         ? ( (MethodCallExpression) access ).Method :
                access is BinaryExpression binary              ? binary.Method :
                throw new ArgumentException ( "Unknown access type", nameof ( access ) );
-    }
-
-    // TODO: Deal with ` and To[A-Z] methods, keywords
-    private static string GenerateVariableName ( Expression instance, SchedulableContext context )
-    {
-        var name = instance.Type.Name;
-        if ( instance.NodeType == ExpressionType.MemberAccess )
-            name = ( (MemberExpression) instance ).Member.Name;
-
-        if ( char.IsUpper ( name [ 0 ] ) )
-            name = char.ToLowerInvariant ( name [ 0 ] ) + name.Substring ( 1 );
-
-        if ( context.Variables.Keys.LastOrDefault ( variable => variable.Name.StartsWith ( name, StringComparison.Ordinal ) ) is { } match )
-            name += int.TryParse ( match.Name.AsSpan ( name.Length ), out var index ) ? index + 1 : 2;
-
-        return name;
     }
 }

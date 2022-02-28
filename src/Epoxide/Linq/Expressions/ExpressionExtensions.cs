@@ -72,6 +72,116 @@ public static class ExpressionExtensions
         return null;
     }
 
+    private static readonly HashSet < string > keywords = new ( )
+    {
+        "abstract", 
+        "as", 
+        "base", 
+        "bool", 
+        "break", 
+        "byte", 
+        "case", 
+        "catch", 
+        "char", 
+        "checked", 
+        "class", 
+        "const", 
+        "continue", 
+        "decimal",
+        "default", 
+        "delegate", 
+        "do", 
+        "double", 
+        "else", 
+        "enum", 
+        "event", 
+        "explicit", 
+        "extern", 
+        "false", 
+        "finally", 
+        "fixed", 
+        "float", 
+        "for", 
+        "foreach", 
+        "goto", 
+        "if", 
+        "implicit", 
+        "in", 
+        "int", 
+        "interface", 
+        "internal", 
+        "is", 
+        "lock", 
+        "long", 
+        "namespace", 
+        "new", 
+        "null", 
+        "object", 
+        "operator", 
+        "out", 
+        "override", 
+        "params", 
+        "private", 
+        "protected", 
+        "public", 
+        "readonly", 
+        "ref", 
+        "return", 
+        "sbyte", 
+        "sealed", 
+        "short", 
+        "sizeof", 
+        "stackalloc", 
+        "static", 
+        "string", 
+        "struct", 
+        "switch", 
+        "this", 
+        "throw", 
+        "true", 
+        "try", 
+        "typeof", 
+        "uint", 
+        "ulong", 
+        "unchecked", 
+        "unsafe", 
+        "ushort", 
+        "using", 
+        "virtual", 
+        "void", 
+        "volatile", 
+        "while"
+    };
+
+    public static ParameterExpression GenerateVariable ( this Expression node, IEnumerable < ParameterExpression >? existingVariables = null )
+    {
+        return Expression.Variable ( node.Type, node.GenerateVariableName ( existingVariables ) );
+    }
+
+    public static string GenerateVariableName ( this Expression node, IEnumerable < ParameterExpression >? existingVariables = null )
+    {
+        var name = ( Nullable.GetUnderlyingType ( node.Type ) ?? node.Type ).Name;
+        if ( node.NodeType == ExpressionType.MemberAccess )
+            name = ( (MemberExpression) node ).Member.Name;
+        else if ( node.Type.IsInterface && name.Length > 1 && name [ 0 ] == 'I' )
+            name = name.Substring ( 1 );
+
+        if ( char.IsUpper ( name [ 0 ] ) )
+            name = char.ToLowerInvariant ( name [ 0 ] ) + name.Substring ( 1 );
+
+        var backtick = name.IndexOf ( '`' );
+        if ( backtick >= 0 )
+            name = name.Substring ( 0, backtick );
+
+        if ( existingVariables != null && existingVariables.LastOrDefault ( variable => variable.Name.StartsWith ( name, StringComparison.Ordinal ) ) is { } match )
+            name += int.TryParse ( match.Name.AsSpan ( name.Length ), out var index ) ? index + 1 : 2;
+
+        if ( keywords.Contains ( name ) )
+            name += "1";
+
+        return name;
+    }
+
     // TODO: Move to NullPropagator with extensions and self methods (non-propagated)
     // TODO: Rename RecursivePropagateNull?
     // TODO: Handle coalesce to null
@@ -164,8 +274,9 @@ public static class ExpressionExtensions
                                           ifFalse: access );
         }
 
-        var variable = Expression.Variable ( propagatedInstance.Type, GenerateVariableName ( instance, propagatedInstance ) );
-        var assign   = Expression.Assign   ( variable, propagatedInstance );
+        var existing = propagatedInstance.GetVariables ( );
+        var variable = propagatedInstance.GenerateVariable ( existing );
+        var assign   = Expression.Assign ( variable, propagatedInstance );
 
         access = new ExpressionReplacer ( Replace ).Visit ( access ).MakeNullable ( );
 
@@ -195,11 +306,12 @@ public static class ExpressionExtensions
     {
         var variables   = new ParameterExpression [ instance.Count ];
         var expressions = new Expression          [ propagatedInstance.Count + 1 ];
+        var existing    = propagatedInstance.SelectMany ( GetVariables );
 
         for ( var index = 0; index < variables.Length; index++ )
         {
             // TODO: Remove multiple array accesses
-            variables   [ index ] = Expression.Variable ( propagatedInstance [ index ].Type, GenerateVariableName ( instance [ index ], propagatedInstance [ index ] ) );
+            variables   [ index ] = propagatedInstance [ index ].GenerateVariable ( existing );
             expressions [ index ] = Expression.Assign   ( variables [ index ], propagatedInstance [ index ] );
         }
 
@@ -227,20 +339,11 @@ public static class ExpressionExtensions
                                   expressions: expressions );
     }
 
-    // TODO: Deal with ` and To[A-Z] methods
-    private static string GenerateVariableName ( Expression instance, Expression propagatedInstance )
+    private static IEnumerable < ParameterExpression > GetVariables ( this Expression node )
     {
-        var name = instance.Type.Name;
-        if ( instance.NodeType == ExpressionType.MemberAccess )
-            name = ( (MemberExpression) instance ).Member.Name;
+        if ( node.NodeType == ExpressionType.Block )
+            return ( (BlockExpression) node ).Variables;
 
-        if ( char.IsUpper ( name [ 0 ] ) )
-            name = char.ToLowerInvariant ( name [ 0 ] ) + name.Substring ( 1 );
-
-        if ( propagatedInstance.NodeType == ExpressionType.Block )
-            if ( ( (BlockExpression) propagatedInstance ).Variables.LastOrDefault ( variable => variable.Name.StartsWith ( name, StringComparison.Ordinal ) ) is { } match )
-                name += int.TryParse ( match.Name.AsSpan ( name.Length ), out var index ) ? index + 1 : 2;
-
-        return name;
+        return Enumerable.Empty < ParameterExpression > ( );
     }
 }
