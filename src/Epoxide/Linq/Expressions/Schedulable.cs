@@ -8,6 +8,9 @@ namespace Epoxide.Linq.Expressions;
 // NOTE: Schedule is also used for change tracking
 public interface IExpressionStateMachine
 {
+    bool Get < T > ( int id, [ MaybeNullWhen ( true ) ] out T value );
+    T    Set < T > ( int id, T value );
+
     bool Schedule < T > ( T instance, MemberInfo member );
     bool Await    < T > ( int id, T value );
 
@@ -15,22 +18,15 @@ public interface IExpressionStateMachine
     ExpressionState SetResult < T > ( T value );
 }
 
-// TODO: Rename LocalState?
-public interface IExpressionStore
-{
-    bool Get < T > ( int id, [ MaybeNullWhen ( true ) ] out T value );
-    T    Set < T > ( int id, T value );
-}
-
 // TODO: Replace state with typed state visitor
 //       Not interfaces to avoid virtual calls
-public interface IExpressionStore < T0 >
+public interface IExpressionStateMachine < T0 > : IExpressionStateMachine
 {
     bool has0 { get; }
     T0   var0 { get; set; }
 }
 
-public interface IExpressionStore < T0, T1 >
+public interface IExpressionStateMachine < T0, T1 > : IExpressionStateMachine
 {
     bool has0 { get; }
     bool has1 { get; }
@@ -38,7 +34,7 @@ public interface IExpressionStore < T0, T1 >
     T1   var1 { get; set; }
 }
 
-// TODO: Rename
+// TODO: Rename values
 public enum ExpressionState
 {
     Fallback,
@@ -48,9 +44,8 @@ public enum ExpressionState
     Wait
 }
 
-// TODO: Need TState, and TSource for ParameterExpression
-// TODO: Rename IScheduledExpression? SchedulableExpression?
-public interface IBindingExpression // NOTE: Represents Binding.Side
+// TODO: Need TState?
+public interface IBindingExpression < TSource > // NOTE: Represents Binding.Side
 {
     IBinderServices Services { get; }
 }
@@ -64,12 +59,10 @@ public class ExpressionStateMachineBuilderContext
     public static readonly MethodInfo exception2 = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.SetException ) );
     public static readonly MethodInfo schedule  = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Schedule ) );
     public static readonly MethodInfo waitFor   = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Await ) );
-    public static readonly MethodInfo read      = typeof ( IExpressionStore ).GetMethod ( nameof ( IExpressionStore.Get ) );
-    public static readonly MethodInfo write     = typeof ( IExpressionStore ).GetMethod ( nameof ( IExpressionStore.Set ) );
+    public static readonly MethodInfo read      = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Get ) );
+    public static readonly MethodInfo write     = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Set ) );
 
-    // TODO: Better names
-    public ParameterExpression Machine { get; } = Expression.Parameter ( typeof ( IExpressionStateMachine ), "machine" );
-    public ParameterExpression Store   { get; } = Expression.Parameter ( typeof ( IExpressionStore ),        "store"   );
+    public ParameterExpression StateMachine { get; } = Expression.Parameter ( typeof ( IExpressionStateMachine ), "λ" );
 
     public IReadOnlyDictionary < ParameterExpression, int > Variables => variables;
 
@@ -109,8 +102,8 @@ public class ExpressionStateMachineBuilderContext
         var typedRead  = read .MakeGenericMethod ( variable.Type );
         var typedWrite = write.MakeGenericMethod ( variable.Type );
 
-        var readValue  = Expression.Call ( Store, typedRead, Expression.Constant ( id ), variable );
-        var writeValue = Expression.Call ( Store, typedWrite, Expression.Constant ( id ), value );
+        var readValue  = Expression.Call ( StateMachine, typedRead, Expression.Constant ( id ), variable );
+        var writeValue = Expression.Call ( StateMachine, typedWrite, Expression.Constant ( id ), value );
 
         return Expression.Condition ( test:    readValue,
                                       ifTrue:  variable,
@@ -122,22 +115,22 @@ public class ExpressionStateMachineBuilderContext
         // TODO: Static
         var capture = typeof ( BindingException ).GetMethod ( nameof ( BindingException.Capture ) );
 
-        return Expression.Call ( Machine, exception2, Expression.Call ( capture, exception ) );
+        return Expression.Call ( StateMachine, exception2, Expression.Call ( capture, exception ) );
     }
 
     public Expression SetResult ( Expression value )
     {
-        return Expression.Call ( Machine, result.MakeGenericMethod ( value.Type ), value );
+        return Expression.Call ( StateMachine, result.MakeGenericMethod ( value.Type ), value );
     }
 
     public Expression Schedule ( Expression expression, MemberInfo member )
     {
-        return Expression.Call ( Machine, schedule.MakeGenericMethod ( expression.Type ), expression, Expression.Constant ( member, typeof ( MemberInfo ) ) );
+        return Expression.Call ( StateMachine, schedule.MakeGenericMethod ( expression.Type ), expression, Expression.Constant ( member, typeof ( MemberInfo ) ) );
     }
 
     public Expression Await ( int id, Expression expression )
     {
-        return Expression.Call ( Machine, waitFor.MakeGenericMethod ( expression.Type ), Expression.Constant ( id ), expression );
+        return Expression.Call ( StateMachine, waitFor.MakeGenericMethod ( expression.Type ), Expression.Constant ( id ), expression );
     }
 }
 

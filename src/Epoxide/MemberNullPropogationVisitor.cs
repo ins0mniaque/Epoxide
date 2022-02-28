@@ -69,7 +69,7 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
             node = node.MakeStateMachine                 ( context );
             node = node.AddStateMachineExceptionHandling ( context );
 
-            return Expression.Lambda ( node, lambda.Parameters.Prepend ( context.Store ).Prepend ( context.Machine ) );
+            return Expression.Lambda ( node, lambda.Parameters.Prepend ( context.StateMachine ) );
         }
 
         return base.Visit ( node );
