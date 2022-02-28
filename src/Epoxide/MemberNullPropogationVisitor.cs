@@ -62,11 +62,13 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
 
             var lambda = (LambdaExpression) node;
 
+            Context.Parameters         = lambda.Parameters;
             Context.WritableExpression = lambda.Body.ToWritable ( );
 
             node = Visit ( lambda.Body );
 
             node = node.MakeStateMachine                 ( Context );
+            node = node.BindStateMachineParameters       ( Context );
             node = node.AddStateMachineExceptionHandling ( Context );
 
             return Expression.Lambda ( node, lambda.Parameters.Prepend ( Context.StateMachine ) );

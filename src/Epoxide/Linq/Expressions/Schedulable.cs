@@ -294,6 +294,8 @@ public class ExpressionStateMachineBuilderContext
 
     public IReadOnlyDictionary < ParameterExpression, int > Variables => variables;
 
+    public IReadOnlyCollection < ParameterExpression >? Parameters { get; set; }
+
     public MemberExpression? WritableExpression    { get; set; }
     public int?              WritableTargetId      { get; private set; }
     public int?              WritableTargetValueId { get; private set; }
@@ -303,12 +305,19 @@ public class ExpressionStateMachineBuilderContext
     public int GetId ( ParameterExpression variable )
     {
         if ( ! variables.TryGetValue ( variable, out var id ) )
-            variables [ variable ] = id = variables.Count;
+            variables [ variable ] = id = variables.Count + ( Parameters?.Count ?? 0 );
 
         return id;
     }
 
     private MemberExpression? WritableExpressionValue { get; set; }
+
+    public Expression Read ( int id, ParameterExpression variable )
+    {
+        var typedRead = read.MakeGenericMethod ( variable.Type );
+
+        return Expression.Call ( StateMachine, typedRead, Expression.Constant ( id ), variable );
+    }
 
     public Expression Assign ( int id, ParameterExpression variable, Expression value )
     {
@@ -372,6 +381,34 @@ public static class StateMachineBuilder
         return Expression.Condition ( test:    context.Await ( -1, expression ),
                                       ifTrue:  Expression.Constant ( ExpressionState.Awaiting ),
                                       ifFalse: context.SetResult ( expression ) );
+    }
+
+    public static Expression BindStateMachineParameters ( this Expression expression, ExpressionStateMachineBuilderContext context )
+    {
+        // TODO: Detect unused parameters
+        if ( context.Parameters == null || context.Parameters.Count == 0 )
+            return expression;
+
+        if ( expression.NodeType != ExpressionType.Block )
+        {
+            return Expression.Block ( type:        expression.Type,
+                                      variables:   context.Parameters,
+                                      expressions: context.Parameters.Select ( AssignParameter ).Append ( expression ) );
+        }
+
+        var block = (BlockExpression) expression;
+
+        return Expression.Block ( type:        block.Type,
+                                  variables:   context.Parameters.Concat ( block.Variables ),
+                                  expressions: context.Parameters.Select ( AssignParameter ).Concat ( block.Expressions ) );
+
+        BinaryExpression AssignParameter ( ParameterExpression parameter, int id )
+        {
+            // TODO: MissingArgumentException
+            var missing = Expression.Throw ( Expression.New ( typeof ( ArgumentException ) ), parameter.Type );
+
+            return Expression.Assign ( parameter, Expression.Condition ( context.Read ( id, parameter ), parameter, missing ) );
+        }
     }
 
     public static Expression AddStateMachineExceptionHandling ( this Expression expression, ExpressionStateMachineBuilderContext context )
