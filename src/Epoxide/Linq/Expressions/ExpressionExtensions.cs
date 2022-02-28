@@ -20,10 +20,7 @@ public static class ExpressionExtensions
     public static bool CanBeNull ( this Expression node )
     {
         // TODO: Handle types that cast non-null to null?
-        var constant = node;
-        while ( constant.NodeType == ExpressionType.Convert )
-            constant = ( (UnaryExpression) constant ).Operand;
-
+        var constant = node.Unconvert ( );
         if ( constant.NodeType == ExpressionType.Constant && ( (ConstantExpression) constant ).Value != null )
             return false;
 
@@ -48,6 +45,14 @@ public static class ExpressionExtensions
         return node;
     }
 
+    public static Expression Unconvert ( this Expression node )
+    {
+        while ( node.NodeType == ExpressionType.Convert )
+            node = ( (UnaryExpression) node ).Operand;
+
+        return node;
+    }
+
     public static bool IsCollection ( this Expression node )
     {
         return node.Type.GetGenericInterfaceArguments ( typeof ( ICollection         < > ) ) != null ||
@@ -56,9 +61,7 @@ public static class ExpressionExtensions
 
     public static MemberExpression? ToWritable ( this Expression node )
     {
-        while ( node.NodeType == ExpressionType.Convert )
-            node = ( (UnaryExpression) node ).Operand;
-
+        node = node.Unconvert ( );
         if ( node.NodeType != ExpressionType.MemberAccess )
             return null;
 

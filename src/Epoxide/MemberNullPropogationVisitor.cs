@@ -62,6 +62,8 @@ public class SchedulableVisitor : ExpressionVisitor
 
             var lambda = (LambdaExpression) node;
 
+            context.WritableExpression = lambda.Body.ToWritable ( );
+
             node = Visit ( lambda.Body );
 
             return Expression.Lambda ( node, lambda.Parameters.Append ( context.State ) );

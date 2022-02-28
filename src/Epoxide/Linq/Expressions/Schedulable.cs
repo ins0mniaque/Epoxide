@@ -22,6 +22,7 @@ public static class StateMachine
 
 // TODO: If multiple scheduler are required by multiple Schedule call,
 //       schedule them all...
+// NOTE: Schedule is also used for change tracking
 public interface IExpressionState
 {
     bool Read  < T > ( int id, [ MaybeNullWhen ( true ) ] out T value );
@@ -33,6 +34,23 @@ public interface IExpressionState
     BindingStatus Fallback     ( );
     BindingStatus Exception    ( ExceptionDispatchInfo exception );
     BindingStatus Result < T > ( T value );
+}
+
+// TODO: Replace state with typed state visitor
+//       Split machine from state
+//       Not interfaces to avoid virtual calls
+public interface IExpressionState < T0 > : IExpressionState
+{
+    bool has0 { get; }
+    T0   var0 { get; set; }
+}
+
+public interface IExpressionState < T0, T1 > : IExpressionState
+{
+    bool has0 { get; }
+    bool has1 { get; }
+    T1   var0 { get; set; }
+    T1   var1 { get; set; }
 }
 
 // TODO: Rename not status...
@@ -68,9 +86,11 @@ public class SchedulableContext
     public ParameterExpression State { get; } = Expression.Parameter ( typeof ( IExpressionState ), "state" );
     public IReadOnlyDictionary < ParameterExpression, int > Variables => variables;
 
+    public MemberExpression? WritableExpression    { get; set; }
+    public int?              WritableTargetId      { get; private set; }
+    public int?              WritableTargetValueId { get; private set; }
+
     private readonly Dictionary < ParameterExpression, int > variables = new Dictionary<ParameterExpression, int> ( );
-
-
 
     public int GetId ( ParameterExpression variable )
     {
@@ -80,8 +100,25 @@ public class SchedulableContext
         return id;
     }
 
+    private MemberExpression? WritableExpressionValue { get; set; }
+
     public Expression Assign ( int id, ParameterExpression variable, Expression value )
     {
+        if ( WritableExpressionValue != null && variable == WritableExpressionValue.Expression )
+            WritableTargetId = id;
+
+        var unconverted = value.Unconvert ( );
+
+        if ( WritableExpression != null && unconverted.NodeType == ExpressionType.MemberAccess )
+        {
+            var valueMember = (MemberExpression) unconverted;
+            if ( valueMember.Member == WritableExpression.Member )
+            {
+                WritableExpressionValue = valueMember;
+                WritableTargetValueId   = id;
+            }
+        }
+
         var typedRead  = read .MakeGenericMethod ( variable.Type );
         var typedWrite = write.MakeGenericMethod ( variable.Type );
 
@@ -420,8 +457,7 @@ public static class Schedulable
 
     private static MemberInfo GetAccessedMember ( Expression access )
     {
-        while ( access.NodeType == ExpressionType.Convert )
-            access = ( (UnaryExpression) access ).Operand;
+        access = access.Unconvert ( );
 
         return access.NodeType == ExpressionType.MemberAccess ? ( (MemberExpression)     access ).Member :
                access.NodeType == ExpressionType.Call         ? ( (MethodCallExpression) access ).Method :
