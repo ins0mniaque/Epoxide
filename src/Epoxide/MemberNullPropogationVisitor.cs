@@ -75,6 +75,7 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
         return base.Visit ( node );
     }
 
+    // TODO: Fix skipping all conversions
     protected override Expression VisitUnary ( UnaryExpression node )
     {
         if ( node.NodeType == ExpressionType.Quote )
@@ -114,6 +115,7 @@ public class NullPropagationVisitor : ExpressionVisitor
 {
     bool recurseLambda = false;
 
+    // TODO: Fix skipping all conversions
     protected override Expression VisitUnary ( UnaryExpression node )
     {
         if ( node.NodeType == ExpressionType.Quote )

@@ -11,7 +11,7 @@ public interface IExpressionStateMachine
     bool Get < T > ( int id, [ MaybeNullWhen ( true ) ] out T value );
     T    Set < T > ( int id, T value );
 
-    bool Schedule < T > ( T instance, MemberInfo member );
+    bool Schedule < T > ( int id, T instance, MemberInfo member );
     bool Await    < T > ( int id, T value );
 
     ExpressionState SetException    ( ExceptionDispatchInfo exception );
@@ -30,27 +30,54 @@ public interface IExpressionStateMachine < T0, T1 > : IExpressionStateMachine
 {
     bool has0 { get; }
     bool has1 { get; }
-    T1   var0 { get; set; }
+    T0   var0 { get; set; }
     T1   var1 { get; set; }
 }
 
-// TODO: Rename values
+// TODO: Reorder/rename values
 public enum ExpressionState
 {
+    Inactive,
     Fallback,
-    Success,
-    Exception,
-    Schedule,
-    Wait
+    Active,
+    Error,
+    Scheduled,
+    Awaiting
 }
 
 // TODO: Need TState?
-public interface IBindingExpression < TSource > // NOTE: Represents Binding.Side
+// TODO: Need interface with IBindableEnumerable
+public interface IBindingExpression < TSource > : IDisposable // NOTE: Represents Binding.Side
 {
-    IBinderServices Services { get; }
+    // IBinderServices Services { get; }
+
+    // LambdaExpression Expression    { get; }
+    // bool             IsCollection  { get; }
+    // bool             IsWritable    { get; }
+    // bool             IsWriteActive { get; }
+
+    // ExpressionState State { get; }
+    // void Bind   ( ); // Starts state machine
+    // void Unbind ( ); // Clear container and store
+
+    // void Read  < TState > ( TSource source, TState state,                ExpressionAccessCallback < TSource, TState, ExpressionReadResult  > callback );
+    // void Write < TState > ( TSource source, TState state, object? value, ExpressionAccessCallback < TSource, TState, ExpressionWriteResult > callback );
 }
 
-// public class BindingExpression : IBindingExpression, IExpressionState { }
+public sealed class BindingExpression < TSource > : IBindingExpression < TSource >
+{
+    // Needs Read/Write like accessor
+    // Schedule: ISchedulerSelector, then schedule read and add to container, also hook member, to container.
+    // Await: IAsyncValue: ... container.
+    // Invalidation from hook: unset value and read again
+    // Manual invalidation: Only by instance + member?
+    // IBindableEnumerable: Only needs CollectionSubscriber and Attach/Detach
+    //                      IBindableEnumerableSubscriber? implemented by this? (Not IBinding)
+    //                      - Has Bind/Unbind too?
+
+    // TODO: Dispose container
+    public void Dispose ( ) { }
+}
 
 // TODO: Reuse variables when expression fingerprint matches
 public class ExpressionStateMachineBuilderContext
@@ -123,9 +150,9 @@ public class ExpressionStateMachineBuilderContext
         return Expression.Call ( StateMachine, result.MakeGenericMethod ( value.Type ), value );
     }
 
-    public Expression Schedule ( Expression expression, MemberInfo member )
+    public Expression Schedule ( int id, Expression expression, MemberInfo member )
     {
-        return Expression.Call ( StateMachine, schedule.MakeGenericMethod ( expression.Type ), expression, Expression.Constant ( member, typeof ( MemberInfo ) ) );
+        return Expression.Call ( StateMachine, schedule.MakeGenericMethod ( expression.Type ), Expression.Constant ( id ), expression, Expression.Constant ( member, typeof ( MemberInfo ) ) );
     }
 
     public Expression Await ( int id, Expression expression )
@@ -142,7 +169,7 @@ public static class StateMachineBuilder
             return expression;
 
         return Expression.Condition ( test:    context.Await ( -1, expression ),
-                                      ifTrue:  Expression.Constant ( ExpressionState.Wait ),
+                                      ifTrue:  Expression.Constant ( ExpressionState.Awaiting ),
                                       ifFalse: context.SetResult ( expression ) );
     }
 
@@ -299,16 +326,16 @@ public static class StateMachineBuilder
         var assignAccess = Expression.Assign   ( accessed, context.Assign ( accessedId, accessed, access ) );
 
         var waitForAccess = Expression.Condition ( test:    context.Await  ( accessedId, assignAccess ),
-                                                   ifTrue:  Expression.Constant ( ExpressionState.Wait ),
+                                                   ifTrue:  Expression.Constant ( ExpressionState.Awaiting ),
                                                    ifFalse: context.SetResult  ( accessed ) );
 
         var member    = GetAccessedMember ( access );
-        var schedule  = Expression.Condition ( test:    context.Schedule  ( variable, member ),
-                                               ifTrue:  Expression.Constant ( ExpressionState.Schedule ),
+        var schedule  = Expression.Condition ( test:    context.Schedule  ( accessedId, variable, member ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Scheduled ),
                                                ifFalse: waitForAccess );
 
         var waitFor   = Expression.Condition ( test:    context.Await  ( id, variable ),
-                                               ifTrue:  Expression.Constant ( ExpressionState.Wait ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Awaiting ),
                                                ifFalse: schedule );
 
         var assigned  = propagated ? (Expression) variable : Expression.Assign ( variable, context.Assign ( id, variable, instance ) );
@@ -385,19 +412,19 @@ public static class StateMachineBuilder
         var assignAccess = Expression.Assign   ( accessed, context.Assign ( accessedId, accessed, access ) );
 
         var waitForAccess = Expression.Condition ( test:    context.Await  ( accessedId, assignAccess ),
-                                                   ifTrue:  Expression.Constant ( ExpressionState.Wait ),
+                                                   ifTrue:  Expression.Constant ( ExpressionState.Awaiting ),
                                                    ifFalse: context.SetResult  ( accessed ) );
 
         var member    = GetAccessedMember ( access );
 
-        var schedule  = Expression.Condition ( test:    variables.Select    ( variable => context.Schedule  ( variable, member ) )
+        var schedule  = Expression.Condition ( test:    variables.Select    ( variable => context.Schedule ( accessedId, variable, member ) )
                                                                  .Aggregate ( Expression.Or ),
-                                               ifTrue:  Expression.Constant ( ExpressionState.Schedule ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Scheduled ),
                                                ifFalse: waitForAccess );
 
         var waitFor   = Expression.Condition ( test:    variables.Select    ( variable => context.Await ( context.GetId ( variable ), variable ) )
                                                                  .Aggregate ( Expression.Or ),
-                                               ifTrue:  Expression.Constant ( ExpressionState.Wait ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Awaiting ),
                                                ifFalse: schedule );
 
         var assigned  = variables.Select ( (variable, index) => propagatedInstance [ index ].NodeType == ExpressionType.Block ? (Expression) variable : Expression.Assign ( variable, context.Assign ( context.GetId ( variable ), variable, instance [ index ] ) ) );
