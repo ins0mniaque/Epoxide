@@ -20,6 +20,8 @@ public static class StateMachine
     }
 }
 
+// TODO: If multiple scheduler are required by multiple Schedule call,
+//       schedule them all...
 public interface IExpressionState
 {
     bool Read  < T > ( int id, [ MaybeNullWhen ( true ) ] out T value );
@@ -150,16 +152,16 @@ public static class Schedulable
 
                     if ( condition.IfTrue.NodeType == ExpressionType.Call && ( (MethodCallExpression) condition.IfTrue ).Method == SchedulableContext.fallback )
                     {
-                        var assign            = ( (BinaryExpression) condition.Test ).Left;
-                        var variable          = assign.NodeType == ExpressionType.Parameter ? (ParameterExpression) assign : (ParameterExpression) ( (BinaryExpression) assign ).Left;
-                        var scheduleCondition = (ConditionalExpression) condition.IfFalse;
-                        var schedule          = (MethodCallExpression)  scheduleCondition.Test;
+                        var assign           = ( (BinaryExpression) condition.Test ).Left;
+                        var variable         = assign.NodeType == ExpressionType.Parameter ? (ParameterExpression) assign : (ParameterExpression) ( (BinaryExpression) assign ).Left;
+                        var waitForCondition = (ConditionalExpression) condition.IfFalse;
+                        var waitFor          = (MethodCallExpression)  waitForCondition.Test;
 
                         replaced.Add ( variable );
 
-                        return Expression.Condition ( test:     Expression.Call ( schedule.Object, schedule.Method, assign, schedule.Arguments [ 1 ] ),
-                                                      ifTrue:   scheduleCondition.IfTrue,
-                                                      ifFalse : scheduleCondition.IfFalse );
+                        return Expression.Condition ( test:     Expression.Call ( waitFor.Object, waitFor.Method, waitFor.Arguments [ 0 ], assign ),
+                                                      ifTrue:   waitForCondition.IfTrue,
+                                                      ifFalse : waitForCondition.IfFalse );
                     }
                 }
 
@@ -262,19 +264,23 @@ public static class Schedulable
         var accessedId   = context.GetId ( accessed );
         var assignAccess = Expression.Assign   ( accessed, context.Assign ( accessedId, accessed, access ) );
 
-        var waitFor   = Expression.Condition ( test:    context.WaitFor  ( accessedId, assignAccess ),
-                                               ifTrue:  Expression.Constant ( BindingStatus.Wait ),
-                                               ifFalse: context.Result  ( accessed ) );
+        var waitForAccess = Expression.Condition ( test:    context.WaitFor  ( accessedId, assignAccess ),
+                                                   ifTrue:  Expression.Constant ( BindingStatus.Wait ),
+                                                   ifFalse: context.Result  ( accessed ) );
 
         var member    = GetAccessedMember ( access );
         var schedule  = Expression.Condition ( test:    context.Schedule  ( variable, member ),
                                                ifTrue:  Expression.Constant ( BindingStatus.Schedule ),
-                                               ifFalse: waitFor );
+                                               ifFalse: waitForAccess );
+
+        var waitFor   = Expression.Condition ( test:    context.WaitFor  ( id, variable ),
+                                               ifTrue:  Expression.Constant ( BindingStatus.Wait ),
+                                               ifFalse: schedule );
 
         var assigned  = propagated ? (Expression) variable : Expression.Assign ( variable, context.Assign ( id, variable, instance ) );
         var nullTest  = Expression.Condition ( test:    Expression.Equal ( assigned, Null ),
                                                ifTrue:  context.Fallback ( ),
-                                               ifFalse: schedule );
+                                               ifFalse: waitFor );
 
         if ( propagated )
         {
@@ -282,8 +288,19 @@ public static class Schedulable
 
             Expression ReplaceResult ( Expression node )
             {
-                if ( node.NodeType == ExpressionType.Call && ((MethodCallExpression) node).Method.IsGenericMethod && ((MethodCallExpression) node).Method.GetGenericMethodDefinition ( ) == SchedulableContext.result )
-                    return nullTest;
+                if ( node.NodeType == ExpressionType.Conditional )
+                {
+                    var ifFalse = ( (ConditionalExpression) node ).IfFalse;
+                    if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.IsGenericMethod && ( (MethodCallExpression) ifFalse ).Method.GetGenericMethodDefinition ( ) == SchedulableContext.result )
+                    {
+                        var waitForAccess = (MethodCallExpression) ( (ConditionalExpression) node ).Test;
+                        var replacement   = (ConditionalExpression) nullTest;
+
+                        return Expression.Condition ( test:    Expression.Equal ( waitForAccess.Arguments [ 1 ], Null ),
+                                                      ifTrue:  replacement.IfTrue,
+                                                      ifFalse: replacement.IfFalse );
+                    }
+                }
 
                 return node;
             }
@@ -333,23 +350,28 @@ public static class Schedulable
         var accessedId   = context.GetId ( accessed );
         var assignAccess = Expression.Assign   ( accessed, context.Assign ( accessedId, accessed, access ) );
 
-        var waitFor   = Expression.Condition ( test:    context.WaitFor  ( accessedId, assignAccess ),
-                                               ifTrue:  Expression.Constant ( BindingStatus.Wait ),
-                                               ifFalse: context.Result  ( accessed ) );
+        var waitForAccess = Expression.Condition ( test:    context.WaitFor  ( accessedId, assignAccess ),
+                                                   ifTrue:  Expression.Constant ( BindingStatus.Wait ),
+                                                   ifFalse: context.Result  ( accessed ) );
 
         var member    = GetAccessedMember ( access );
+
         var schedule  = Expression.Condition ( test:    variables.Select    ( variable => context.Schedule  ( variable, member ) )
                                                                  .Aggregate ( Expression.Or ),
                                                ifTrue:  Expression.Constant ( BindingStatus.Schedule ),
-                                               ifFalse: waitFor );
+                                               ifFalse: waitForAccess );
+
+        var waitFor   = Expression.Condition ( test:    variables.Select    ( variable => context.WaitFor ( context.GetId ( variable ), variable ) )
+                                                                 .Aggregate ( Expression.Or ),
+                                               ifTrue:  Expression.Constant ( BindingStatus.Wait ),
+                                               ifFalse: schedule );
 
         var assigned  = variables.Select ( (variable, index) => propagatedInstance [ index ].NodeType == ExpressionType.Block ? (Expression) variable : Expression.Assign ( variable, context.Assign ( context.GetId ( variable ), variable, instance [ index ] ) ) );
         var nullTest  = Expression.Condition ( test:    assigned.Select    ( variable => Expression.Equal ( variable, Null ) )
                                                                 .Aggregate ( Expression.OrElse ),
                                                ifTrue:  context.Fallback ( ),
-                                               ifFalse: schedule );
+                                               ifFalse: waitFor );
 
-        // TODO: Fix WaitFor calls to use bitwise Or like Schedule
         if ( propagatedInstance.Any ( p => p.NodeType == ExpressionType.Block ) )
         {
             propagatedInstance = propagatedInstance.Where ( p => p.NodeType == ExpressionType.Block ).ToList ( );
@@ -363,21 +385,21 @@ public static class Schedulable
 
                 Expression ReplaceResult ( Expression node )
                 {
-                    if ( node.NodeType == ExpressionType.Call && ((MethodCallExpression) node).Method.IsGenericMethod && ((MethodCallExpression) node).Method.GetGenericMethodDefinition ( ) == SchedulableContext.result )
+                    if ( node.NodeType == ExpressionType.Conditional )
                     {
-                        var result = index + 1 < propagatedInstance.Count ? propagatedInstance [ index + 1 ] : nullTest;
-
-                        if ( result.NodeType == ExpressionType.Block )
+                        var ifFalse = ( (ConditionalExpression) node ).IfFalse;
+                        if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.IsGenericMethod && ( (MethodCallExpression) ifFalse ).Method.GetGenericMethodDefinition ( ) == SchedulableContext.result )
                         {
-                            var block = (BlockExpression) result;
-                            if ( block.Expressions.Count > 1 )
-                                throw new InvalidOperationException ( "Invalid propagated block" );
+                            var waitForAccess = (MethodCallExpression) ( (ConditionalExpression) node ).Test;
+                            var replacement   = index + 1 < propagatedInstance.Count ? (ConditionalExpression) ( (BlockExpression) propagatedInstance [ index + 1 ] ).Expressions [ 0 ] : nullTest;
 
-                            result = block.Expressions [ 0 ];
-                            vars.AddRange ( block.Variables );
+                            if ( index + 1 < propagatedInstance.Count )
+                                vars.AddRange ( ( (BlockExpression) propagatedInstance [ index + 1 ] ).Variables );
+
+                            return Expression.Condition ( test:    Expression.Equal ( waitForAccess.Arguments [ 1 ], Null ),
+                                                          ifTrue:  replacement.IfTrue,
+                                                          ifFalse: replacement.IfFalse );
                         }
-
-                        return result;
                     }
 
                     return node;
