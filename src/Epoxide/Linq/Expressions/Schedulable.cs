@@ -18,22 +18,6 @@ public interface IExpressionStateMachine
     ExpressionState SetResult < T > ( T value );
 }
 
-// TODO: Replace state with typed state visitor
-//       Not interfaces to avoid virtual calls
-public interface IExpressionStateMachine < T0 > : IExpressionStateMachine
-{
-    bool has0 { get; }
-    T0   var0 { get; set; }
-}
-
-public interface IExpressionStateMachine < T0, T1 > : IExpressionStateMachine
-{
-    bool has0 { get; }
-    bool has1 { get; }
-    T0   var0 { get; set; }
-    T1   var1 { get; set; }
-}
-
 // TODO: Reorder/rename values
 public enum ExpressionState
 {
@@ -49,8 +33,6 @@ public enum ExpressionState
 // TODO: Need interface with IBindableEnumerable
 public interface IBindingExpression < TSource > : IDisposable // NOTE: Represents Binding.Side
 {
-    // IBinderServices Services { get; }
-
     // LambdaExpression Expression    { get; }
     // bool             IsCollection  { get; }
     // bool             IsWritable    { get; }
@@ -64,6 +46,58 @@ public interface IBindingExpression < TSource > : IDisposable // NOTE: Represent
     // void Write < TState > ( TSource source, TState state, object? value, ExpressionAccessCallback < TSource, TState, ExpressionWriteResult > callback );
 }
 
+public interface IExpressionStateMachineStore
+{
+    IExpressionStateMachine StateMachine { get; init; }
+
+    bool Get   ( int id, [ MaybeNullWhen ( true ) ] out object? value );
+    void Set   ( int id, object? value );
+    void Clear ( int id );
+}
+
+// TODO: Replace state with typed state visitor
+// TODO: Automatically generate the stores 
+public struct ExpressionStateMachineStore < T0 > : IExpressionStateMachine, IExpressionStateMachineStore
+{
+    public IExpressionStateMachine StateMachine { get; init; }
+
+    // TODO: public?
+    bool has0;
+    T0   var0;
+
+    public bool Get<T> ( int id, [MaybeNullWhen ( true )] out T value ) => throw new NotSupportedException ( );
+    public T Set<T> ( int id, T value ) => throw new NotSupportedException ( );
+    public bool Await<T> ( int id, T value ) => StateMachine.Await ( id, value );
+    public bool Schedule<T> ( int id, T instance, MemberInfo member ) => StateMachine.Schedule ( id, instance, member );
+    public ExpressionState SetException ( ExceptionDispatchInfo exception ) => StateMachine.SetException ( exception );
+    public ExpressionState SetResult<T> ( T value ) => StateMachine.SetResult ( value );
+
+    public bool Get ( int id, [ MaybeNullWhen ( true ) ] out object? value )
+    {
+        switch(id)
+        {
+            case 0: value = var0; return has0;
+            default: value = default; return false;
+        }
+    }
+
+    public void Set ( int id, object? value )
+    {
+        switch(id)
+        {
+            case 0: var0 = (T0) value; has0 = true; break;
+        }
+    }
+
+    public void Clear ( int id )
+    {
+        switch ( id )
+        {
+            case 0: var0 = default; has0 = false; break;
+        }
+    }
+}
+
 public sealed class BindingExpression < TSource > : IBindingExpression < TSource >
 {
     // Needs Read/Write like accessor
@@ -74,6 +108,8 @@ public sealed class BindingExpression < TSource > : IBindingExpression < TSource
     // IBindableEnumerable: Only needs CollectionSubscriber and Attach/Detach
     //                      IBindableEnumerableSubscriber? implemented by this? (Not IBinding)
     //                      - Has Bind/Unbind too?
+
+    // IExpressionStateMachine Store => Wrapper over itself with store separated
 
     // TODO: Dispose container
     public void Dispose ( ) { }
