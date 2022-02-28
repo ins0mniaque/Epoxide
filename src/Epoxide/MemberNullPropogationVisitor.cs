@@ -45,10 +45,10 @@ public class SentinelExpressionTransformer : IExpressionTransformer
     }
 }
 
-public class SchedulableVisitor : ExpressionVisitor
+public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
 {
     bool recurseLambda = false;
-    SchedulableContext context = new ( );
+    ExpressionStateMachineBuilderContext context = new ( );
 
     bool first = true;
 
@@ -66,7 +66,9 @@ public class SchedulableVisitor : ExpressionVisitor
 
             node = Visit ( lambda.Body );
 
-            return Expression.Lambda ( node, lambda.Parameters.Append ( context.State ) );
+            // TODO: Generate try/catch
+
+            return Expression.Lambda ( node, lambda.Parameters.Prepend ( context.Store ).Prepend ( context.Machine ) );
         }
 
         return base.Visit ( node );
@@ -93,17 +95,17 @@ public class SchedulableVisitor : ExpressionVisitor
 
     protected override Expression VisitBinary ( BinaryExpression node )
     {
-        return node.AsSchedulable ( Visit ( node.Left ), Visit ( node.Right ), context );
+        return node.ToStateMachine ( Visit ( node.Left ), Visit ( node.Right ), context );
     }
 
     protected override Expression VisitMember ( MemberExpression node )
     {
-        return node.AsSchedulable ( Visit ( node.Expression ), context );
+        return node.ToStateMachine ( Visit ( node.Expression ), context );
     }
 
     protected override Expression VisitMethodCall ( MethodCallExpression node )
     {
-        return node.AsSchedulable ( Visit ( node.Object ), node.Arguments.Select ( Visit ), context );
+        return node.ToStateMachine ( Visit ( node.Object ), node.Arguments.Select ( Visit ), context );
     }
 }
 

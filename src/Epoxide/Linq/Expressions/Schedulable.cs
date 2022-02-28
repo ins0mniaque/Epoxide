@@ -3,49 +3,34 @@ using System.Runtime.ExceptionServices;
 
 namespace Epoxide.Linq.Expressions;
 
-public static class StateMachine 
-{
-    public static BindingStatus MoveNext < TSource > ( this Func < TSource, IExpressionState, BindingStatus > compiled, TSource source, IExpressionState state )
-    {
-        try
-        {
-            return compiled ( source, state );
-        }
-        catch ( Exception exception )
-        {
-            state.Exception ( BindingException.Capture ( exception ) );
-
-            return BindingStatus.Exception;
-        }
-    }
-}
-
 // TODO: If multiple scheduler are required by multiple Schedule call,
 //       schedule them all...
 // NOTE: Schedule is also used for change tracking
-public interface IExpressionState
+public interface IExpressionStateMachine
 {
-    bool Read  < T > ( int id, [ MaybeNullWhen ( true ) ] out T value );
-    T    Write < T > ( int id, T value );
-
     bool Schedule < T > ( T instance, MemberInfo member );
-    bool WaitFor  < T > ( int id, T value ); // Rename IsAsync? IsAsyncValue?
+    bool Await    < T > ( int id, T value );
 
-    BindingStatus Fallback     ( );
-    BindingStatus Exception    ( ExceptionDispatchInfo exception );
-    BindingStatus Result < T > ( T value );
+    ExpressionState SetException    ( ExceptionDispatchInfo exception );
+    ExpressionState SetResult < T > ( T value );
+}
+
+// TODO: Rename LocalState?
+public interface IExpressionStore
+{
+    bool Get < T > ( int id, [ MaybeNullWhen ( true ) ] out T value );
+    T    Set < T > ( int id, T value );
 }
 
 // TODO: Replace state with typed state visitor
-//       Split machine from state
 //       Not interfaces to avoid virtual calls
-public interface IExpressionState < T0 > : IExpressionState
+public interface IExpressionStore < T0 >
 {
     bool has0 { get; }
     T0   var0 { get; set; }
 }
 
-public interface IExpressionState < T0, T1 > : IExpressionState
+public interface IExpressionStore < T0, T1 >
 {
     bool has0 { get; }
     bool has1 { get; }
@@ -53,8 +38,8 @@ public interface IExpressionState < T0, T1 > : IExpressionState
     T1   var1 { get; set; }
 }
 
-// TODO: Rename not status...
-public enum BindingStatus
+// TODO: Rename
+public enum ExpressionState
 {
     Fallback,
     Success,
@@ -73,17 +58,19 @@ public interface IBindingExpression // NOTE: Represents Binding.Side
 // public class BindingExpression : IBindingExpression, IExpressionState { }
 
 // TODO: Reuse variables when expression fingerprint matches
-public class SchedulableContext
+public class ExpressionStateMachineBuilderContext
 {
-    public static readonly MethodInfo result   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Result ) );
-    public static readonly MethodInfo fallback  = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Fallback ) );
-    public static readonly MethodInfo exception2 = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Exception ) );
-    public static readonly MethodInfo schedule  = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Schedule ) );
-    public static readonly MethodInfo waitFor   = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.WaitFor ) );
-    public static readonly MethodInfo read      = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Read ) );
-    public static readonly MethodInfo write     = typeof ( IExpressionState ).GetMethod ( nameof ( IExpressionState.Write ) );
+    public static readonly MethodInfo result   = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.SetResult ) );
+    public static readonly MethodInfo exception2 = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.SetException ) );
+    public static readonly MethodInfo schedule  = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Schedule ) );
+    public static readonly MethodInfo waitFor   = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Await ) );
+    public static readonly MethodInfo read      = typeof ( IExpressionStore ).GetMethod ( nameof ( IExpressionStore.Get ) );
+    public static readonly MethodInfo write     = typeof ( IExpressionStore ).GetMethod ( nameof ( IExpressionStore.Set ) );
 
-    public ParameterExpression State { get; } = Expression.Parameter ( typeof ( IExpressionState ), "state" );
+    // TODO: Better names
+    public ParameterExpression Machine { get; } = Expression.Parameter ( typeof ( IExpressionStateMachine ), "machine" );
+    public ParameterExpression Store   { get; } = Expression.Parameter ( typeof ( IExpressionStore ),        "store"   );
+
     public IReadOnlyDictionary < ParameterExpression, int > Variables => variables;
 
     public MemberExpression? WritableExpression    { get; set; }
@@ -122,54 +109,48 @@ public class SchedulableContext
         var typedRead  = read .MakeGenericMethod ( variable.Type );
         var typedWrite = write.MakeGenericMethod ( variable.Type );
 
-        var readValue  = Expression.Call ( State, typedRead, Expression.Constant ( id ), variable );
-        var writeValue = Expression.Call ( State, typedWrite, Expression.Constant ( id ), value );
+        var readValue  = Expression.Call ( Store, typedRead, Expression.Constant ( id ), variable );
+        var writeValue = Expression.Call ( Store, typedWrite, Expression.Constant ( id ), value );
 
         return Expression.Condition ( test:    readValue,
                                       ifTrue:  variable,
                                       ifFalse: writeValue );
     }
 
-    public Expression Fallback ( )
+    public Expression SetException ( Expression exception )
     {
-        return Expression.Call ( State, fallback );
+        return Expression.Call ( Machine, exception2, exception );
     }
 
-    public Expression Exception ( Expression exception )
+    public Expression SetResult ( Expression value )
     {
-        return Expression.Call ( State, exception2, exception );
-    }
-
-    public Expression Result ( Expression value )
-    {
-        return Expression.Call ( State, result.MakeGenericMethod ( value.Type ), value );
+        return Expression.Call ( Machine, result.MakeGenericMethod ( value.Type ), value );
     }
 
     public Expression Schedule ( Expression expression, MemberInfo member )
     {
-        return Expression.Call ( State, schedule.MakeGenericMethod ( expression.Type ), expression, Expression.Constant ( member, typeof ( MemberInfo ) ) );
+        return Expression.Call ( Machine, schedule.MakeGenericMethod ( expression.Type ), expression, Expression.Constant ( member, typeof ( MemberInfo ) ) );
     }
 
-    public Expression WaitFor ( int id, Expression expression )
+    public Expression Await ( int id, Expression expression )
     {
-        return Expression.Call ( State, waitFor.MakeGenericMethod ( expression.Type ), Expression.Constant ( id ), expression );
+        return Expression.Call ( Machine, waitFor.MakeGenericMethod ( expression.Type ), Expression.Constant ( id ), expression );
     }
 }
-    
-// TODO: Rename Binding something? or Schedulable.ToScheduled
-public static class Schedulable
+
+public static class StateMachineBuilder
 {
-    public static Expression AsSchedulable ( this MemberExpression member, Expression? expression, SchedulableContext context )
+    public static Expression ToStateMachine ( this MemberExpression member, Expression? expression, ExpressionStateMachineBuilderContext context )
     {
         return MakeSchedulable ( member, member.Expression, expression, context );
     }
 
-    public static Expression AsSchedulable ( this MethodCallExpression method, Expression? @object, IEnumerable < Expression > arguments, SchedulableContext context )
+    public static Expression ToStateMachine ( this MethodCallExpression method, Expression? @object, IEnumerable < Expression > arguments, ExpressionStateMachineBuilderContext context )
     {
         return MakeSchedulable ( method, method.Object, @object, method.Arguments, arguments, context );
     }
 
-    public static Expression AsSchedulable ( this BinaryExpression binary, Expression? left, Expression? right, SchedulableContext context )
+    public static Expression ToStateMachine ( this BinaryExpression binary, Expression? left, Expression? right, ExpressionStateMachineBuilderContext context )
     {
         var isCoalesceToNull = binary.NodeType == ExpressionType.Coalesce &&
                                right .NodeType == ExpressionType.Constant &&
@@ -187,7 +168,8 @@ public static class Schedulable
                 {
                     var condition = (ConditionalExpression) node;
 
-                    if ( condition.IfTrue.NodeType == ExpressionType.Call && ( (MethodCallExpression) condition.IfTrue ).Method == SchedulableContext.fallback )
+                    // TODO: Compare with stored ConstantExpression for Fallback
+                    if ( condition.IfTrue.NodeType == ExpressionType.Constant && Equals ( ( (ConstantExpression) condition.IfTrue ).Value, ExpressionState.Fallback ) )
                     {
                         var assign           = ( (BinaryExpression) condition.Test ).Left;
                         var variable         = assign.NodeType == ExpressionType.Parameter ? (ParameterExpression) assign : (ParameterExpression) ( (BinaryExpression) assign ).Left;
@@ -238,20 +220,21 @@ public static class Schedulable
     }
 
     // TODO: Replace IsNullable with IsSchedulable
-    private static Expression MakeSchedulable ( Expression access, Expression? instance, Expression? propagatedInstance, SchedulableContext context )
+    // TODO: Rename
+    private static Expression MakeSchedulable ( Expression access, Expression? instance, Expression? propagatedInstance, ExpressionStateMachineBuilderContext context )
     {
-        if ( instance != null && propagatedInstance != null && ( instance.CanBeNull ( ) || propagatedInstance.Type == typeof ( BindingStatus ) ) )
+        if ( instance != null && propagatedInstance != null && ( instance.CanBeNull ( ) || propagatedInstance.Type == typeof ( ExpressionState ) ) )
             return MakeSingleSchedulable ( access, instance, propagatedInstance, context );
 
         return access;
     }
 
-    private static Expression MakeSchedulable ( Expression access, Expression? instance, Expression? propagatedInstance, IReadOnlyCollection < Expression > arguments, IEnumerable < Expression > propagatedArguments, SchedulableContext context )
+    private static Expression MakeSchedulable ( Expression access, Expression? instance, Expression? propagatedInstance, IReadOnlyCollection < Expression > arguments, IEnumerable < Expression > propagatedArguments, ExpressionStateMachineBuilderContext context )
     {
         var instances           = new List < Expression > ( );
         var propagatedInstances = new List < Expression > ( );
 
-        if ( instance != null && propagatedInstance != null && ( instance.CanBeNull ( ) || propagatedInstance.Type == typeof ( BindingStatus ) ) )
+        if ( instance != null && propagatedInstance != null && ( instance.CanBeNull ( ) || propagatedInstance.Type == typeof ( ExpressionState ) ) )
         {
             instances          .Add ( instance );
             propagatedInstances.Add ( propagatedInstance );
@@ -265,7 +248,7 @@ public static class Schedulable
             if ( ! propagatedArgumentsEnumerator.MoveNext ( ) )
                 throw new ArgumentException ( "Less propagated arguments than arguments were provided", nameof ( propagatedArguments ) );
 
-            if ( argumentsEnumerator.Current.CanBeNull ( ) || propagatedArgumentsEnumerator.Current.Type == typeof ( BindingStatus ) )
+            if ( argumentsEnumerator.Current.CanBeNull ( ) || propagatedArgumentsEnumerator.Current.Type == typeof ( ExpressionState ) )
             {
                 instances          .Add ( argumentsEnumerator          .Current );
                 propagatedInstances.Add ( propagatedArgumentsEnumerator.Current );
@@ -280,7 +263,7 @@ public static class Schedulable
     private readonly static ConstantExpression Null = Expression.Constant ( null );
 
     // TODO: Clean up propagated instance detection (must return BindingStatus)
-    private static Expression MakeSingleSchedulable ( Expression access, Expression instance, Expression propagatedInstance, SchedulableContext context )
+    private static Expression MakeSingleSchedulable ( Expression access, Expression instance, Expression propagatedInstance, ExpressionStateMachineBuilderContext context )
     {
         var propagated = propagatedInstance.NodeType == ExpressionType.Block;
         var variable   = propagated ? ( (BlockExpression) propagatedInstance ).Variables.LastOrDefault ( ) :
@@ -301,22 +284,22 @@ public static class Schedulable
         var accessedId   = context.GetId ( accessed );
         var assignAccess = Expression.Assign   ( accessed, context.Assign ( accessedId, accessed, access ) );
 
-        var waitForAccess = Expression.Condition ( test:    context.WaitFor  ( accessedId, assignAccess ),
-                                                   ifTrue:  Expression.Constant ( BindingStatus.Wait ),
-                                                   ifFalse: context.Result  ( accessed ) );
+        var waitForAccess = Expression.Condition ( test:    context.Await  ( accessedId, assignAccess ),
+                                                   ifTrue:  Expression.Constant ( ExpressionState.Wait ),
+                                                   ifFalse: context.SetResult  ( accessed ) );
 
         var member    = GetAccessedMember ( access );
         var schedule  = Expression.Condition ( test:    context.Schedule  ( variable, member ),
-                                               ifTrue:  Expression.Constant ( BindingStatus.Schedule ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Schedule ),
                                                ifFalse: waitForAccess );
 
-        var waitFor   = Expression.Condition ( test:    context.WaitFor  ( id, variable ),
-                                               ifTrue:  Expression.Constant ( BindingStatus.Wait ),
+        var waitFor   = Expression.Condition ( test:    context.Await  ( id, variable ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Wait ),
                                                ifFalse: schedule );
 
         var assigned  = propagated ? (Expression) variable : Expression.Assign ( variable, context.Assign ( id, variable, instance ) );
         var nullTest  = Expression.Condition ( test:    Expression.Equal ( assigned, Null ),
-                                               ifTrue:  context.Fallback ( ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Fallback ),
                                                ifFalse: waitFor );
 
         if ( propagated )
@@ -328,7 +311,7 @@ public static class Schedulable
                 if ( node.NodeType == ExpressionType.Conditional )
                 {
                     var ifFalse = ( (ConditionalExpression) node ).IfFalse;
-                    if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.IsGenericMethod && ( (MethodCallExpression) ifFalse ).Method.GetGenericMethodDefinition ( ) == SchedulableContext.result )
+                    if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.IsGenericMethod && ( (MethodCallExpression) ifFalse ).Method.GetGenericMethodDefinition ( ) == ExpressionStateMachineBuilderContext.result )
                     {
                         var waitForAccess = (MethodCallExpression) ( (ConditionalExpression) node ).Test;
                         var replacement   = (ConditionalExpression) nullTest;
@@ -358,7 +341,7 @@ public static class Schedulable
                                   } );
     }
 
-    private static Expression MakeMultipleSchedulables ( Expression access, List < Expression > instance, List < Expression > propagatedInstance, SchedulableContext context )
+    private static Expression MakeMultipleSchedulables ( Expression access, List < Expression > instance, List < Expression > propagatedInstance, ExpressionStateMachineBuilderContext context )
     {
         var variables = new ParameterExpression [ instance.Count ];
 
@@ -387,26 +370,26 @@ public static class Schedulable
         var accessedId   = context.GetId ( accessed );
         var assignAccess = Expression.Assign   ( accessed, context.Assign ( accessedId, accessed, access ) );
 
-        var waitForAccess = Expression.Condition ( test:    context.WaitFor  ( accessedId, assignAccess ),
-                                                   ifTrue:  Expression.Constant ( BindingStatus.Wait ),
-                                                   ifFalse: context.Result  ( accessed ) );
+        var waitForAccess = Expression.Condition ( test:    context.Await  ( accessedId, assignAccess ),
+                                                   ifTrue:  Expression.Constant ( ExpressionState.Wait ),
+                                                   ifFalse: context.SetResult  ( accessed ) );
 
         var member    = GetAccessedMember ( access );
 
         var schedule  = Expression.Condition ( test:    variables.Select    ( variable => context.Schedule  ( variable, member ) )
                                                                  .Aggregate ( Expression.Or ),
-                                               ifTrue:  Expression.Constant ( BindingStatus.Schedule ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Schedule ),
                                                ifFalse: waitForAccess );
 
-        var waitFor   = Expression.Condition ( test:    variables.Select    ( variable => context.WaitFor ( context.GetId ( variable ), variable ) )
+        var waitFor   = Expression.Condition ( test:    variables.Select    ( variable => context.Await ( context.GetId ( variable ), variable ) )
                                                                  .Aggregate ( Expression.Or ),
-                                               ifTrue:  Expression.Constant ( BindingStatus.Wait ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Wait ),
                                                ifFalse: schedule );
 
         var assigned  = variables.Select ( (variable, index) => propagatedInstance [ index ].NodeType == ExpressionType.Block ? (Expression) variable : Expression.Assign ( variable, context.Assign ( context.GetId ( variable ), variable, instance [ index ] ) ) );
         var nullTest  = Expression.Condition ( test:    assigned.Select    ( variable => Expression.Equal ( variable, Null ) )
                                                                 .Aggregate ( Expression.OrElse ),
-                                               ifTrue:  context.Fallback ( ),
+                                               ifTrue:  Expression.Constant ( ExpressionState.Fallback ),
                                                ifFalse: waitFor );
 
         if ( propagatedInstance.Any ( p => p.NodeType == ExpressionType.Block ) )
@@ -425,7 +408,7 @@ public static class Schedulable
                     if ( node.NodeType == ExpressionType.Conditional )
                     {
                         var ifFalse = ( (ConditionalExpression) node ).IfFalse;
-                        if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.IsGenericMethod && ( (MethodCallExpression) ifFalse ).Method.GetGenericMethodDefinition ( ) == SchedulableContext.result )
+                        if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.IsGenericMethod && ( (MethodCallExpression) ifFalse ).Method.GetGenericMethodDefinition ( ) == ExpressionStateMachineBuilderContext.result )
                         {
                             var waitForAccess = (MethodCallExpression) ( (ConditionalExpression) node ).Test;
                             var replacement   = index + 1 < propagatedInstance.Count ? (ConditionalExpression) ( (BlockExpression) propagatedInstance [ index + 1 ] ).Expressions [ 0 ] : nullTest;

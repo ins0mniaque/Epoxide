@@ -35,8 +35,8 @@ public sealed class Binding < TSource > : IBinding < TSource >, IExpressionTrans
         disposables = new CompositeDisposable ( 4 );
 
         // TODO: Remove test
-        // var testLeft  = new SchedulableVisitor ( ).Visit ( left  );
-        // var testRight = new SchedulableVisitor ( ).Visit ( right );
+        var testLeft  = new ExpressionStateMachineBuilderVisitor ( ).Visit ( left  );
+        var testRight = new ExpressionStateMachineBuilderVisitor ( ).Visit ( right );
 
         Services = new BindingServices ( services.MemberSubscriber,
                                          services.CollectionSubscriber,
