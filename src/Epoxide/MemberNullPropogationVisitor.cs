@@ -50,7 +50,7 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
     bool recurseLambda = false;
     bool first         = true;
 
-    public ExpressionStateMachineBuilderContext Context { get; } = new ( );
+    public ExpressionStateMachineBuilderContext? Context { get; private set; }
 
     public override Expression Visit ( Expression node )
     {
@@ -62,8 +62,7 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
 
             var lambda = (LambdaExpression) node;
 
-            Context.Parameters         = lambda.Parameters;
-            Context.WritableExpression = lambda.Body.ToWritable ( );
+            Context = new ExpressionStateMachineBuilderContext ( lambda );
 
             node = Visit ( lambda.Body );
 
