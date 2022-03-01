@@ -71,7 +71,7 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
             node = node.BindStateMachineParameters       ( Context );
             node = node.AddStateMachineExceptionHandling ( Context );
 
-            return Expression.Lambda ( node, lambda.Parameters.Prepend ( Context.StateMachine ) );
+            return Expression.Lambda ( node, Context.StateMachine );
         }
 
         return base.Visit ( node );
@@ -89,6 +89,11 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
     protected override Expression VisitLambda < T > ( Expression < T > node )
     {
         return recurseLambda ? base.VisitLambda ( node ) : node;
+    }
+
+    protected override Expression VisitParameter ( ParameterExpression node )
+    {
+        return node.ToStateMachine ( Context );
     }
 
     // TODO: Verify if something is needed here

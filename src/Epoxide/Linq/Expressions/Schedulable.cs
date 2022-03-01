@@ -190,17 +190,15 @@ public static class BindingExpression
     public static IBindingExpression < TSource, TValue > Create < TSource, TValue > ( Expression < Func < TSource, TValue > > expression )
     {
         var visitor       = new ExpressionStateMachineBuilderVisitor ( );
-        var stateMachined = (Expression < Func < IExpressionStateMachine, TSource, ExpressionState > >) visitor.Visit ( expression );
+        var stateMachined = (Expression < Func < IExpressionStateMachine, ExpressionState > >) visitor.Visit ( expression );
 
         // TODO: Create appropriate ExpressionStateMachineStore < > if variables.Count is low enough
         //       and convert expression
-        var variables = visitor.Context.Variables;
-        var store     = new ExpressionStateMachineStore ( variables.Count );
+        var parameters = visitor.Context.Parameters;
+        var variables  = visitor.Context.Variables;
+        var store      = new ExpressionStateMachineStore ( parameters.Count + variables.Count );
 
-        // TODO: Embed source in machine to have a single argument and
-        //       allow MoveNext ( ) on IExpressionStateMachine.
-        // var moveNext = CachedExpressionCompiler.Compile ( stateMachined );
-        var moveNext = stateMachined.Compile ( );
+        var moveNext = CachedExpressionCompiler.Compile ( stateMachined );
 
         return new BindingExpression < ExpressionStateMachineStore, TSource, TValue > ( store, moveNext );
     }
@@ -210,10 +208,10 @@ public sealed class BindingExpression < TStateMachineStore, TSource, TValue > : 
     where TStateMachineStore : IExpressionStateMachineStore
 {
     private readonly TStateMachineStore  store;
-    private readonly Func < TStateMachineStore, TSource, ExpressionState > moveNext;
+    private readonly Func < TStateMachineStore, ExpressionState > moveNext;
     private readonly CompositeDisposable disposables;
 
-    public BindingExpression ( TStateMachineStore store, Func < TStateMachineStore, TSource, ExpressionState > moveNext )
+    public BindingExpression ( TStateMachineStore store, Func < TStateMachineStore, ExpressionState > moveNext )
     {
         this.store = store;
         this.disposables = new ( );
@@ -293,14 +291,14 @@ public class ExpressionStateMachineBuilderContext
     public ParameterExpression StateMachine { get; } = Expression.Parameter ( typeof ( IExpressionStateMachine ), "λ" );
 
     public IReadOnlyDictionary < ParameterExpression, int > Variables => variables;
-
-    public IReadOnlyCollection < ParameterExpression >? Parameters { get; set; }
+    public IReadOnlyCollection < ParameterExpression >      Parameters { get; set; } = Array.Empty < ParameterExpression > ( );
 
     public MemberExpression? WritableExpression    { get; set; }
     public int?              WritableTargetId      { get; private set; }
     public int?              WritableTargetValueId { get; private set; }
 
-    private readonly Dictionary < ParameterExpression, int > variables = new Dictionary<ParameterExpression, int> ( );
+    private readonly Dictionary < ParameterExpression, int  > variables  = new Dictionary<ParameterExpression, int> ( );
+    private readonly HashSet    < ParameterExpression >       parameters = new HashSet<ParameterExpression> ( );
 
     public int GetId ( ParameterExpression variable )
     {
@@ -309,6 +307,9 @@ public class ExpressionStateMachineBuilderContext
 
         return id;
     }
+
+    public bool IsUsed     ( ParameterExpression parameter ) => parameters.Contains ( parameter );
+    public void MarkAsUsed ( ParameterExpression parameter ) => parameters.Add      ( parameter );
 
     private MemberExpression? WritableExpressionValue { get; set; }
 
@@ -385,24 +386,27 @@ public static class StateMachineBuilder
 
     public static Expression BindStateMachineParameters ( this Expression expression, ExpressionStateMachineBuilderContext context )
     {
-        // TODO: Detect unused parameters
         if ( context.Parameters == null || context.Parameters.Count == 0 )
             return expression;
+
+        var parameters = context.Parameters.Select ( (p, i) => (Parameter: p, Assign: AssignParameter ( p, i )) )
+                                           .Where  ( e => context.IsUsed ( e.Parameter ) )
+                                           .ToList ( );
 
         if ( expression.NodeType != ExpressionType.Block )
         {
             return Expression.Block ( type:        expression.Type,
-                                      variables:   context.Parameters,
-                                      expressions: context.Parameters.Select ( AssignParameter ).Append ( expression ) );
+                                      variables:   parameters.Select ( e => e.Parameter ),
+                                      expressions: parameters.Select ( e => e.Assign    ).Append ( expression ) );
         }
 
         var block = (BlockExpression) expression;
 
         return Expression.Block ( type:        block.Type,
-                                  variables:   context.Parameters.Concat ( block.Variables ),
-                                  expressions: context.Parameters.Select ( AssignParameter ).Concat ( block.Expressions ) );
+                                  variables:   parameters.Select ( e => e.Parameter ).Concat ( block.Variables   ),
+                                  expressions: parameters.Select ( e => e.Assign    ).Concat ( block.Expressions ) );
 
-        BinaryExpression AssignParameter ( ParameterExpression parameter, int id )
+        BinaryExpression? AssignParameter ( ParameterExpression parameter, int id )
         {
             // TODO: MissingArgumentException
             var missing = Expression.Throw ( Expression.New ( typeof ( ArgumentException ) ), parameter.Type );
@@ -417,6 +421,13 @@ public static class StateMachineBuilder
         var catchBlock = Expression.Catch     ( exception, context.SetException ( exception ) );
 
         return Expression.TryCatch ( expression, catchBlock );
+    }
+
+    public static Expression ToStateMachine ( this ParameterExpression parameter, ExpressionStateMachineBuilderContext context )
+    {
+        context.MarkAsUsed ( parameter );
+
+        return parameter;
     }
 
     public static Expression ToStateMachine ( this MemberExpression member, Expression? expression, ExpressionStateMachineBuilderContext context )
