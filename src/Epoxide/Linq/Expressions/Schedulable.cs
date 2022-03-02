@@ -720,14 +720,14 @@ public static class StateMachineBuilder
             {
                 if ( propagatedInstance [ index ].NodeType != ExpressionType.Block )
                 {
-                    allVariables.Add ( replacements [ instance [ index ] ] );
+                    allVariables.Insert ( 0, replacements [ instance [ index ] ] );
                     continue;
                 }
 
                 propagated = (BlockExpression) propagatedInstance [ index ];
                 propagated = (BlockExpression) new ExpressionReplacer ( ReplaceResult ).Visit ( propagated );
 
-                allVariables.AddRange ( propagated.Variables );
+                allVariables.InsertRange ( 0, propagated.Variables );
 
                 Expression ReplaceResult ( Expression node )
                 {
