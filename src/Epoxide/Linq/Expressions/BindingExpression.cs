@@ -39,24 +39,78 @@ public static class BindingExpression
         var store      = new ExpressionStateMachineStore < TValue > ( parameters.Count + variables.Count );
 
         var moveNext = CachedExpressionCompiler.Compile ( stateMachined );
+        var setter   = visitor.Context.WritableTarget   is { } target ? new ConstantExpressionSetter < TValue > ( target, visitor.Context.WritableExpression.Member ) :
+                       visitor.Context.WritableTargetId is { } id     ? new ExpressionSetter         < TValue > ( id,     visitor.Context.WritableExpression.Member ) :
+                       (IExpressionSetter < TValue >?) null;
 
-        return new BindingExpression < TSource, TValue > ( new ExpressionStateMachine < ExpressionStateMachineStore < TValue >, TValue > ( store, moveNext ) );
+        return new BindingExpression < TSource, TValue > ( new ExpressionStateMachine < ExpressionStateMachineStore < TValue >, TValue > ( store, moveNext ), setter );
     }
 }
 
+// TODO: Rename IExpressionStateMachineSetter?
+public interface IExpressionSetter < TValue >
+{
+    bool SetValue ( IExpressionStateMachine < TValue > stateMachine, TValue? value );
+}
+
+public sealed class ConstantExpressionSetter < TValue > : IExpressionSetter < TValue >
+{
+    private readonly Action < object, TValue > setter;
+    private readonly object                    target;
+
+    public ConstantExpressionSetter ( object constant, MemberInfo member )
+    {
+        setter = DynamicTypeAccessor.CompileSetter < TValue > ( member );
+        target = constant;
+    }
+
+    public bool SetValue ( IExpressionStateMachine < TValue > stateMachine, TValue value )
+    {
+        setter ( target, value );
+
+        return true;
+    }
+}
+
+public sealed class ExpressionSetter < TValue > : IExpressionSetter < TValue >
+{
+    private readonly Action < object, TValue > setter;
+    private readonly int                       targetId;
+
+    public ExpressionSetter ( int id, MemberInfo member )
+    {
+        setter   = DynamicTypeAccessor.CompileSetter < TValue > ( member );
+        targetId = id;
+    }
+
+    public bool SetValue ( IExpressionStateMachine < TValue > stateMachine, TValue value )
+    {
+        if ( stateMachine.Get < object > ( targetId, out var target ) && target != null )
+        {
+            setter ( target, value );
+
+            return true;
+        }
+
+        return false;
+    }
+}
+
+// TODO: Multi-model binding expressions
 public sealed class BindingExpression < TSource, TValue > : IBindingExpression < TSource, TValue >
 {
     private readonly IExpressionStateMachine < TValue > stateMachine;
+    private readonly IExpressionSetter < TValue >?      setter;
 
-    public BindingExpression ( IExpressionStateMachine < TValue > stateMachine )
+    public BindingExpression ( IExpressionStateMachine < TValue > stateMachine, IExpressionSetter < TValue >? setter = null )
     {
         this.stateMachine = stateMachine;
+        this.setter       = setter;
     }
 
-    public bool SetValue ( object? value )
+    public bool SetValue ( TValue value )
     {
-        // TODO: If active and writable
-        return false;
+        return setter != null && setter.SetValue ( stateMachine, value );
     }
 
     public void Bind ( TSource source )
@@ -64,16 +118,14 @@ public sealed class BindingExpression < TSource, TValue > : IBindingExpression <
         stateMachine.Set ( 0, source );
 
         stateMachine.MoveNext ( );
+
+        // TODO: Hook stateMachine.StateChanged
     }
 
     public void Unbind ( )
     {
-        // TODO: Fix this
-        // disposables.Clear ( );
-
-        stateMachine.Clear ( 0 );
+        stateMachine.Cancel ( );
     }
-
 
     public void Dispose ( )
     {

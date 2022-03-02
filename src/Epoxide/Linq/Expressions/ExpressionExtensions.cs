@@ -184,7 +184,6 @@ public static class ExpressionExtensions
 
     // TODO: Move to NullPropagator with extensions and self methods (non-propagated)
     // TODO: Rename RecursivePropagateNull?
-    // TODO: Handle coalesce to null
     public static Expression PropagateNull ( this BinaryExpression binary, Expression left, Expression right )
     {
         if ( binary.NodeType == ExpressionType.Coalesce )

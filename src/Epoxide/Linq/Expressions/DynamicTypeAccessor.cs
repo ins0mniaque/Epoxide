@@ -8,6 +8,11 @@ public static class DynamicTypeAccessor
         return CompileSetter ( member, typeof ( object ) );
     }
 
+    public static Action < object, TValue > CompileSetter < TValue > ( this MemberInfo member )
+    {
+        return (target, value) => Write ( target, member, value );
+    }
+
     public static Action < object, object? > CompileSetter ( this MemberInfo member, Type valueType )
     {
         return (target, value) => Write ( target, member, value );

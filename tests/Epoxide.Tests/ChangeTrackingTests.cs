@@ -240,6 +240,23 @@ public class ChangeTrackingTests
     }
 
     [ Fact ]
+    public void NotifyPropertyChangedOnProperty ( )
+    {
+        var obj = new NotifyPropertyChangedEventObject {StringValue = "Hello",};
+        var left = new NotifyPropertyChangedEventObject {StringValue = "",};
+
+        Binder.Default.Bind ( ( ) => left.StringValue == obj.StringValue );
+
+        Assert.Equal ( 1, obj.PropertyChangedCount );
+
+        Assert.Equal ( obj.StringValue, left.StringValue );
+
+        obj.StringValue = "Goodbye";
+
+        Assert.Equal ( "Goodbye", left.StringValue );
+    }
+
+    [ Fact ]
     public void RemoveNotifyPropertyChanged ( )
     {
         var obj = new NotifyPropertyChangedEventObject {StringValue = "Hello",};

@@ -19,7 +19,10 @@ public class ExpressionStateMachineBuilderContext
 
         StateMachine       = Expression.Parameter ( typeof ( IExpressionStateMachine < > ).MakeGenericType ( lambda.Body.Type ), "λ" );
         Parameters         = lambda.Parameters;
-        WritableExpression = lambda.ToWritable ( );
+        WritableExpression = lambda.Body.ToWritable ( );
+
+        if ( WritableExpression != null && WritableExpression.Expression != null && WritableExpression.Expression.NodeType == ExpressionType.Constant )
+            WritableTarget = ( (ConstantExpression) WritableExpression.Expression ).Value;
     }
 
     public ParameterExpression StateMachine { get; }
@@ -27,9 +30,11 @@ public class ExpressionStateMachineBuilderContext
     public IReadOnlyDictionary < ParameterExpression, int > Variables => variables;
     public IReadOnlyCollection < ParameterExpression >      Parameters { get; }
 
-    public MemberExpression? WritableExpression    { get; }
-    public int?              WritableTargetId      { get; private set; }
-    public int?              WritableTargetValueId { get; private set; }
+    public MemberExpression?    WritableExpression     { get; }
+    public ParameterExpression? WritableTargetVariable { get; private set; }
+    public object?              WritableTarget         { get; private set; }
+    public int?                 WritableTargetId => WritableTargetVariable != null &&
+                                                    variables.TryGetValue ( WritableTargetVariable, out var id ) ? id : null;
 
     private readonly Dictionary < ParameterExpression, int  > variables  = new Dictionary<ParameterExpression, int> ( );
     private readonly HashSet    < ParameterExpression >       parameters = new HashSet<ParameterExpression> ( );
@@ -45,8 +50,6 @@ public class ExpressionStateMachineBuilderContext
     public bool IsUsed     ( ParameterExpression parameter ) => parameters.Contains ( parameter );
     public void MarkAsUsed ( ParameterExpression parameter ) => parameters.Add      ( parameter );
 
-    private MemberExpression? WritableExpressionValue { get; set; }
-
     public Expression Read ( int id, ParameterExpression variable )
     {
         var typedRead = read.MakeGenericMethod ( variable.Type );
@@ -56,19 +59,13 @@ public class ExpressionStateMachineBuilderContext
 
     public Expression Assign ( int id, ParameterExpression variable, Expression value )
     {
-        if ( WritableExpressionValue != null && variable == WritableExpressionValue.Expression )
-            WritableTargetId = id;
-
         var unconverted = value.Unconvert ( );
 
-        if ( WritableExpression != null && unconverted.NodeType == ExpressionType.MemberAccess )
+        if ( WritableExpression != null && WritableTarget == null && unconverted.NodeType == ExpressionType.MemberAccess )
         {
             var valueMember = (MemberExpression) unconverted;
-            if ( valueMember.Member == WritableExpression.Member )
-            {
-                WritableExpressionValue = valueMember;
-                WritableTargetValueId   = id;
-            }
+            if ( valueMember.Member == WritableExpression.Member && valueMember.Expression.NodeType == ExpressionType.Parameter )
+                WritableTargetVariable = (ParameterExpression) valueMember.Expression;
         }
 
         var typedRead  = read .MakeGenericMethod ( variable.Type );
@@ -216,6 +213,7 @@ public static class StateMachineBuilder
             }
 
             // TODO: This needs force type change with MakeNullable, and RemoveNullable at usage
+            //       Should probably propagate nulls before building the state machine
             left = new ExpressionReplacer ( CoalesceAccess ).Visit ( left );
 
             Expression CoalesceAccess ( Expression node )
