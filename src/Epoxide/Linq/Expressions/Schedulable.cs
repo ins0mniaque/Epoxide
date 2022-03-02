@@ -587,10 +587,11 @@ public static class StateMachineBuilder
     // TODO: Clean up propagated instance detection (must return BindingStatus)
     private static Expression MakeSingleSchedulable ( Expression access, Expression instance, Expression propagatedInstance, ExpressionStateMachineBuilderContext context )
     {
-        var propagated = propagatedInstance.NodeType == ExpressionType.Block;
-        var variable   = propagated ? ( (BlockExpression) propagatedInstance ).Variables.LastOrDefault ( ) :
-                                      instance.GenerateVariable ( context.Variables.Keys );
-        var id         = context.GetId ( variable );
+        var variables = new List < (ParameterExpression Variable, BinaryExpression Assign) > ( );
+
+        propagatedInstance.GetVariablesAndAssigns ( variables, context );
+
+        var variable = variables.First ( ).Variable;
 
         access = new ExpressionReplacer ( ReplaceInstance ).Visit ( access ).MakeNullable ( );
 
@@ -611,23 +612,25 @@ public static class StateMachineBuilder
                                                    ifFalse: context.SetResult  ( accessed ) );
 
         var member    = GetAccessedMember ( access );
-        var schedule  = Expression.Condition ( test:    context.Schedule  ( accessedId, variable, member ),
+        var schedule  = Expression.Condition ( test:    variables.Select    ( v => context.Schedule ( accessedId, v.Variable, member ) )
+                                                                 .Aggregate ( Expression.Or ),
                                                ifTrue:  Expression.Constant ( ExpressionState.Scheduled ),
                                                ifFalse: waitForAccess );
 
-        var waitFor   = Expression.Condition ( test:    context.Await  ( id, variable ),
+        var waitFor   = Expression.Condition ( test:    variables.Select    ( v => context.Await ( context.GetId ( v.Variable ), v.Variable ) )
+                                                                 .Aggregate ( Expression.Or ),
                                                ifTrue:  Expression.Constant ( ExpressionState.Awaiting ),
                                                ifFalse: schedule );
 
-        var assigned  = propagated ? (Expression) variable : Expression.Assign ( variable, context.Assign ( id, variable, instance ) );
-        var nullTest  = Expression.Condition ( test:    Expression.Equal ( assigned, Null ),
+        var nullTest  = Expression.Condition ( test:    variables.Select    ( v => Expression.Equal ( v.Assign, Null ) )
+                                                                 .Aggregate ( Expression.OrElse ),
                                                ifTrue:  Expression.Constant ( ExpressionState.Fallback ),
                                                ifFalse: waitFor );
 
-        if ( propagated )
+        if ( propagatedInstance.NodeType == ExpressionType.Block )
         {
             var block = (BlockExpression) new ExpressionReplacer ( ReplaceResult ).Visit ( propagatedInstance );
-
+        
             Expression ReplaceResult ( Expression node )
             {
                 if ( node.NodeType == ExpressionType.Conditional )
@@ -635,22 +638,15 @@ public static class StateMachineBuilder
                     // TODO: Clean up this test
                     var ifFalse = ( (ConditionalExpression) node ).IfFalse;
                     if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.DeclaringType.IsGenericType && ( (MethodCallExpression) ifFalse ).Method.DeclaringType.GetGenericTypeDefinition ( ) == typeof ( IExpressionStateMachine < > ) )
-                    {
-                        var waitForAccess = (MethodCallExpression) ( (ConditionalExpression) node ).Test;
-                        var replacement   = (ConditionalExpression) nullTest;
-
-                        return Expression.Condition ( test:    Expression.Equal ( waitForAccess.Arguments [ 1 ], Null ),
-                                                      ifTrue:  replacement.IfTrue,
-                                                      ifFalse: replacement.IfFalse );
-                    }
+                        return nullTest;
                 }
-
+        
                 return node;
             }
-
+        
             if ( block.Expressions.Count > 1 )
                 throw new InvalidOperationException ( "Invalid propagated block" );
-
+        
             return Expression.Block ( type:        nullTest.Type,
                                       variables:   block.Variables.Append ( accessed ),
                                       expressions: block.Expressions );
@@ -666,25 +662,24 @@ public static class StateMachineBuilder
 
     private static Expression MakeMultipleSchedulables ( Expression access, List < Expression > instance, List < Expression > propagatedInstance, ExpressionStateMachineBuilderContext context )
     {
-        var variables = new ParameterExpression [ instance.Count ];
+        var variables    = new List < (ParameterExpression Variable, BinaryExpression Assign) > ( );
+        var replacements = new Dictionary < Expression, ParameterExpression > ( instance.Count );
 
-        for ( var index = 0; index < variables.Length; index++ )
+        for ( var index = 0; index < instance.Count; index++ )
         {
-            // TODO: Remove multiple array accesses
-            var propagated = propagatedInstance [ index ].NodeType == ExpressionType.Block;
-            var variable   = propagated ? ( (BlockExpression) propagatedInstance [ index ] ).Variables.LastOrDefault ( ) :
-                                          instance [ index ].GenerateVariable ( context.Variables.Keys );
+            var firstVariableIndex = variables.Count;
 
-            variables [ index ] = variable;
+            propagatedInstance [ index ].GetVariablesAndAssigns ( variables, context );
+
+            replacements [ instance [ index ] ] = variables [ firstVariableIndex ].Variable;
         }
 
         access = new ExpressionReplacer ( Replace ).Visit ( access ).MakeNullable ( );
 
         Expression Replace ( Expression node )
         {
-            var index = instance.IndexOf ( node );
-            if ( index >= 0 )
-                return instance [ index ].IsNullableStruct ( ) ? variables [ index ] : variables [ index ].RemoveNullable ( );
+            if ( replacements.TryGetValue ( node, out var variable ) )
+                return node.IsNullableStruct ( ) ? variable : variable.RemoveNullable ( );
 
             return node;
         }
@@ -699,32 +694,38 @@ public static class StateMachineBuilder
 
         var member    = GetAccessedMember ( access );
 
-        var schedule  = Expression.Condition ( test:    variables.Select    ( variable => context.Schedule ( accessedId, variable, member ) )
+        var schedule  = Expression.Condition ( test:    variables.Select    ( v => context.Schedule ( accessedId, v.Variable, member ) )
                                                                  .Aggregate ( Expression.Or ),
                                                ifTrue:  Expression.Constant ( ExpressionState.Scheduled ),
                                                ifFalse: waitForAccess );
 
-        var waitFor   = Expression.Condition ( test:    variables.Select    ( variable => context.Await ( context.GetId ( variable ), variable ) )
+        var waitFor   = Expression.Condition ( test:    variables.Select    ( v => context.Await ( context.GetId ( v.Variable ), v.Variable ) )
                                                                  .Aggregate ( Expression.Or ),
                                                ifTrue:  Expression.Constant ( ExpressionState.Awaiting ),
                                                ifFalse: schedule );
 
-        var assigned  = variables.Select ( (variable, index) => propagatedInstance [ index ].NodeType == ExpressionType.Block ? (Expression) variable : Expression.Assign ( variable, context.Assign ( context.GetId ( variable ), variable, instance [ index ] ) ) );
-        var nullTest  = Expression.Condition ( test:    assigned.Select    ( variable => Expression.Equal ( variable, Null ) )
-                                                                .Aggregate ( Expression.OrElse ),
+        var nullTest  = Expression.Condition ( test:    variables.Select    ( v => Expression.Equal ( v.Assign, Null ) )
+                                                                 .Aggregate ( Expression.OrElse ),
                                                ifTrue:  Expression.Constant ( ExpressionState.Fallback ),
                                                ifFalse: waitFor );
 
         if ( propagatedInstance.Any ( p => p.NodeType == ExpressionType.Block ) )
         {
-            propagatedInstance = propagatedInstance.Where ( p => p.NodeType == ExpressionType.Block ).ToList ( );
-
-            var vars = new List < ParameterExpression > ( );
+            var allVariables = new List < ParameterExpression > ( );
+            var propagated   = (BlockExpression?) null;
 
             for ( var index = propagatedInstance.Count - 1; index >= 0; index-- )
             {
-                if ( propagatedInstance [ index ].NodeType == ExpressionType.Block )
-                    propagatedInstance [ index ] = new ExpressionReplacer ( ReplaceResult ).Visit ( propagatedInstance [ index ] );
+                if ( propagatedInstance [ index ].NodeType != ExpressionType.Block )
+                {
+                    allVariables.Add ( replacements [ instance [ index ] ] );
+                    continue;
+                }
+
+                propagated = (BlockExpression) propagatedInstance [ index ];
+                propagated = (BlockExpression) new ExpressionReplacer ( ReplaceResult ).Visit ( propagated );
+
+                allVariables.AddRange ( propagated.Variables );
 
                 Expression ReplaceResult ( Expression node )
                 {
@@ -733,33 +734,66 @@ public static class StateMachineBuilder
                         // TODO: Clean up this test
                         var ifFalse = ( (ConditionalExpression) node ).IfFalse;
                         if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.DeclaringType.IsGenericType && ( (MethodCallExpression) ifFalse ).Method.DeclaringType.GetGenericTypeDefinition ( ) == typeof ( IExpressionStateMachine < > ) )
-                        {
-                            var waitForAccess = (MethodCallExpression) ( (ConditionalExpression) node ).Test;
-                            var replacement   = index + 1 < propagatedInstance.Count ? (ConditionalExpression) ( (BlockExpression) propagatedInstance [ index + 1 ] ).Expressions [ 0 ] : nullTest;
-
-                            if ( index + 1 < propagatedInstance.Count )
-                                vars.AddRange ( ( (BlockExpression) propagatedInstance [ index + 1 ] ).Variables );
-
-                            return Expression.Condition ( test:    Expression.Equal ( waitForAccess.Arguments [ 1 ], Null ),
-                                                          ifTrue:  replacement.IfTrue,
-                                                          ifFalse: replacement.IfFalse );
-                        }
+                            return nullTest;
                     }
 
                     return node;
                 }
+
+                nullTest = (ConditionalExpression) propagated.Expressions [ 0 ];
             }
 
-            var block = (BlockExpression) propagatedInstance [ 0 ];
+            allVariables.Add ( accessed );
 
             return Expression.Block ( type:        nullTest.Type,
-                                      variables:   block.Variables.Concat ( vars ).Append ( accessed ),
-                                      expressions: block.Expressions );
+                                      variables:   allVariables,
+                                      expressions: propagated.Expressions );
         }
 
         return Expression.Block ( type:        nullTest.Type,
-                                  variables:   variables.Append ( accessed ),
+                                  variables:   variables.Select ( v => v.Variable ).Append ( accessed ),
                                   expressions: nullTest );
+    }
+
+    private static void GetVariablesAndAssigns ( this Expression propagatedInstance, List < (ParameterExpression, BinaryExpression) > variables, ExpressionStateMachineBuilderContext context )
+    {
+        if ( propagatedInstance.NodeType != ExpressionType.Block )
+        {
+            var variable = propagatedInstance.GenerateVariable ( context.Variables.Keys );
+            var assign   = Expression.Assign ( variable, context.Assign ( context.GetId ( variable ), variable, propagatedInstance ) );
+
+            variables.Add ( (variable, assign) );
+
+            return;
+        }
+
+        var resultFound = false;
+
+        new ExpressionReplacer ( ExtractAssigns ).Visit ( propagatedInstance );
+
+        Expression ExtractAssigns ( Expression node )
+        {
+            if ( node.NodeType == ExpressionType.Conditional )
+            {
+                // TODO: Clean up this test
+                var ifFalse = ( (ConditionalExpression) node ).IfFalse;
+                if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.DeclaringType.IsGenericType && ( (MethodCallExpression) ifFalse ).Method.DeclaringType.GetGenericTypeDefinition ( ) == typeof ( IExpressionStateMachine < > ) )
+                    resultFound = true;
+            }
+
+            if ( resultFound && node.NodeType == ExpressionType.Assign )
+            {
+                var variable = (ParameterExpression) ( (BinaryExpression) node ).Left;
+                var assign   = (BinaryExpression) node;
+
+                variables.Add ( (variable, assign) );
+            }
+
+            return node;
+        }
+
+        if ( ! resultFound )
+            "".ToString ( );
     }
 
     private static MemberInfo GetAccessedMember ( Expression access )
