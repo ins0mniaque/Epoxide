@@ -5,8 +5,6 @@ using Epoxide.Disposables;
 
 namespace Epoxide.Linq.Expressions;
 
-// TODO: If multiple scheduler are required by multiple Schedule call,
-//       schedule them all...
 // NOTE: Schedule is also used for change tracking
 public interface IExpressionStateMachine : IDisposable
 {
@@ -589,7 +587,7 @@ public static class StateMachineBuilder
     {
         var variables = new List < (ParameterExpression Variable, BinaryExpression Assign) > ( );
 
-        propagatedInstance.GetVariablesAndAssigns ( variables, context );
+        propagatedInstance.GetVariablesAndAssigns ( variables, null, context );
 
         var variable = variables.First ( ).Variable;
 
@@ -613,7 +611,7 @@ public static class StateMachineBuilder
 
         var member    = GetAccessedMember ( access );
         var schedule  = Expression.Condition ( test:    variables.Select    ( v => context.Schedule ( accessedId, v.Variable, member ) )
-                                                                 .Aggregate ( Expression.Or ),
+                                                                 .Aggregate ( Expression.OrElse ),
                                                ifTrue:  Expression.Constant ( ExpressionState.Scheduled ),
                                                ifFalse: waitForAccess );
 
@@ -663,16 +661,20 @@ public static class StateMachineBuilder
     private static Expression MakeMultipleSchedulables ( Expression access, List < Expression > instance, List < Expression > propagatedInstance, ExpressionStateMachineBuilderContext context )
     {
         var variables    = new List < (ParameterExpression Variable, BinaryExpression Assign) > ( );
+        var schedules    = new List < Expression > ( );
         var replacements = new Dictionary < Expression, ParameterExpression > ( instance.Count );
 
         for ( var index = 0; index < instance.Count; index++ )
         {
             var firstVariableIndex = variables.Count;
 
-            propagatedInstance [ index ].GetVariablesAndAssigns ( variables, context );
+            propagatedInstance [ index ].GetVariablesAndAssigns ( variables, schedules, context );
 
             replacements [ instance [ index ] ] = variables [ firstVariableIndex ].Variable;
         }
+
+        if ( schedules.Count == 1 )
+            schedules.Clear ( );
 
         access = new ExpressionReplacer ( Replace ).Visit ( access ).MakeNullable ( );
 
@@ -695,7 +697,7 @@ public static class StateMachineBuilder
         var member    = GetAccessedMember ( access );
 
         var schedule  = Expression.Condition ( test:    variables.Select    ( v => context.Schedule ( accessedId, v.Variable, member ) )
-                                                                 .Aggregate ( Expression.Or ),
+                                                                 .Aggregate ( Expression.OrElse ),
                                                ifTrue:  Expression.Constant ( ExpressionState.Scheduled ),
                                                ifFalse: waitForAccess );
 
@@ -729,6 +731,15 @@ public static class StateMachineBuilder
 
                 Expression ReplaceResult ( Expression node )
                 {
+                    if ( schedules.Contains ( node ) )
+                    {
+                        var mergedSchedules = schedules.Aggregate ( Expression.OrElse );
+
+                        schedules.Clear ( );
+
+                        return mergedSchedules;
+                    }
+
                     if ( node.NodeType == ExpressionType.Conditional )
                     {
                         // TODO: Clean up this test
@@ -755,7 +766,7 @@ public static class StateMachineBuilder
                                   expressions: nullTest );
     }
 
-    private static void GetVariablesAndAssigns ( this Expression propagatedInstance, List < (ParameterExpression, BinaryExpression) > variables, ExpressionStateMachineBuilderContext context )
+    private static void GetVariablesAndAssigns ( this Expression propagatedInstance, List < (ParameterExpression, BinaryExpression) > variables, List < Expression >? schedules, ExpressionStateMachineBuilderContext context )
     {
         if ( propagatedInstance.NodeType != ExpressionType.Block )
         {
@@ -773,6 +784,18 @@ public static class StateMachineBuilder
 
         Expression ExtractAssigns ( Expression node )
         {
+            if ( schedules != null && node.NodeType == ExpressionType.Conditional )
+            {
+                // TODO: Clean up this test
+                var ifFalse = ( (ConditionalExpression) node ).IfFalse;
+                if ( ifFalse.NodeType == ExpressionType.Conditional )
+                {
+                    ifFalse = ( (ConditionalExpression) ifFalse ).IfFalse;
+                    if ( ifFalse.NodeType == ExpressionType.Call && ( (MethodCallExpression) ifFalse ).Method.DeclaringType.IsGenericType && ( (MethodCallExpression) ifFalse ).Method.DeclaringType.GetGenericTypeDefinition ( ) == typeof ( IExpressionStateMachine < > ) )
+                        schedules.Add ( ( (ConditionalExpression) node ).Test );
+                }
+            }
+
             if ( node.NodeType == ExpressionType.Conditional )
             {
                 // TODO: Clean up this test
@@ -793,7 +816,7 @@ public static class StateMachineBuilder
         }
 
         if ( ! resultFound )
-            "".ToString ( );
+            throw new InvalidOperationException ( "Result expression not found" );
     }
 
     private static MemberInfo GetAccessedMember ( Expression access )
