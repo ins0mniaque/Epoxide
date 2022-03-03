@@ -5,11 +5,11 @@
 public class ExpressionStateMachineBuilderContext
 {
     public        readonly MethodInfo result;
-    public static readonly MethodInfo exception2 = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.SetException ) );
-    public static readonly MethodInfo schedule   = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Schedule ) );
-    public static readonly MethodInfo waitFor    = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Await ) );
-    public static readonly MethodInfo read       = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Get ) );
-    public static readonly MethodInfo write      = typeof ( IExpressionStateMachine ).GetMethod ( nameof ( IExpressionStateMachine.Set ) );
+    public static readonly MethodInfo exception2 = typeof ( IExpressionStateMachine        ).GetMethod ( nameof ( IExpressionStateMachine       .SetException ) );
+    public static readonly MethodInfo schedule   = typeof ( IExpressionStateMachineHandler ).GetMethod ( nameof ( IExpressionStateMachineHandler.Schedule     ) );
+    public static readonly MethodInfo await      = typeof ( IExpressionStateMachineHandler ).GetMethod ( nameof ( IExpressionStateMachineHandler.Await        ) );
+    public static readonly MethodInfo read       = typeof ( IExpressionStateMachine        ).GetMethod ( nameof ( IExpressionStateMachine       .Get          ) );
+    public static readonly MethodInfo write      = typeof ( IExpressionStateMachine        ).GetMethod ( nameof ( IExpressionStateMachine       .Set          ) );
 
     public ExpressionStateMachineBuilderContext ( LambdaExpression lambda )
     {
@@ -47,6 +47,12 @@ public class ExpressionStateMachineBuilderContext
         return id;
     }
 
+    public Expression MarkAsSkipped ( Expression access )
+    {
+        // TODO: Store for metadata and negative await ids
+        return access;
+    }
+
     public bool IsUsed     ( ParameterExpression parameter ) => parameters.Contains ( parameter );
     public void MarkAsUsed ( ParameterExpression parameter ) => parameters.Add      ( parameter );
 
@@ -82,7 +88,7 @@ public class ExpressionStateMachineBuilderContext
     public Expression SetException ( Expression exception )
     {
         // TODO: Static
-        var capture = typeof ( BindingException ).GetMethod ( nameof ( BindingException.Capture ) );
+        var capture = typeof ( StateMachineException ).GetMethod ( nameof ( StateMachineException.Capture ) );
 
         return Expression.Call ( StateMachine, exception2, Expression.Call ( capture, exception ) );
     }
@@ -103,7 +109,7 @@ public class ExpressionStateMachineBuilderContext
 
     public Expression Await ( int id, Expression expression )
     {
-        return Expression.Call ( StateMachine, waitFor.MakeGenericMethod ( expression.Type ), Expression.Constant ( id ), expression );
+        return Expression.Call ( StateMachine, await.MakeGenericMethod ( expression.Type ), Expression.Constant ( id ), expression );
     }
 }
 
@@ -252,7 +258,7 @@ public static class StateMachineBuilder
         if ( instance != null && propagatedInstance != null && ( instance.CanBeNull ( ) || propagatedInstance.Type == typeof ( ExpressionState ) ) )
             return MakeSingleSchedulable ( access, instance, propagatedInstance, context );
 
-        return access;
+        return context.MarkAsSkipped ( access );
     }
 
     private static Expression MakeSchedulable ( Expression access, Expression? instance, Expression? propagatedInstance, IReadOnlyCollection < Expression > arguments, IEnumerable < Expression > propagatedArguments, ExpressionStateMachineBuilderContext context )
@@ -283,7 +289,7 @@ public static class StateMachineBuilder
 
         return instances.Count == 1 ? MakeSingleSchedulable    ( access, instances [ 0 ], propagatedInstances [ 0 ], context ) :
                instances.Count >  1 ? MakeMultipleSchedulables ( access, instances,       propagatedInstances,       context ) :
-               access;
+               context.MarkAsSkipped ( access );
     }
 
     private readonly static ConstantExpression Null = Expression.Constant ( null );

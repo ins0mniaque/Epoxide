@@ -200,7 +200,7 @@ public class BindingTests
 
         Assert.Equal ( right, 42 );
 
-        var exception = Assert.Throws < BindingException > ( ( ) => Binder.Default.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right ) );
+        var exception = Assert.Throws < StateMachineException > ( ( ) => Binder.Default.Bind ( ( ) => ( (int?) left.ToString ( ).Length ?? null ) == right ) );
 
         Assert.IsType < InvalidCastException > ( exception.InnerException );
 

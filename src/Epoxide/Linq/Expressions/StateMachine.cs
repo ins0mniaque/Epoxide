@@ -1,29 +1,80 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 
-using Epoxide.Disposables;
-
 namespace Epoxide.Linq.Expressions;
 
+public interface IAwaiter < T >
+{
+    IDisposable Await < TState > ( TState state, Action < TState, T? > onCompleted, Action < TState, ExceptionDispatchInfo? > onException );
+}
+
+// NOTE: Task.Result is supported by awaiting task and MoveNext,
+//       which will read .Result
+public interface IAwaiterSelector // Name? New binding service?
+{
+    // TryAwait?
+    IAwaiter < T >? SelectAwaiter < T > ( T awaitable );
+}
+
+public interface INewScheduler
+{
+    IDisposable Schedule < TState > ( TState state, Action < TState > action );
+}
+
+public interface INewSchedulerSelector
+{
+    INewScheduler? SelectScheduler < T > ( T instance, MemberInfo member );
+}
+
+// TODO: Split into 2 interfaces? IExpressionStateMachineScheduler/Awaiter
+public interface IExpressionStateMachineHandler
+{
+    bool Schedule < T > ( int id, T instance, MemberInfo member );
+    bool Await    < T > ( int id, T value );
+}
+
+// TODO: Create once and reuse
+//       Not sure if needs to be exposed on state machine
+public interface IExpressionStateMachineMetadata
+{
+    Type [ ] Parameters { get; }
+    Type [ ] Variables  { get; }
+}
+
+public sealed class ExpressionStateMachineHandler : IExpressionStateMachineHandler
+{
+    public static ExpressionStateMachineHandler Default { get; } = new ( );
+
+    public bool Schedule < T > ( int id, T instance, MemberInfo member )
+    {
+        return false;
+    }
+
+    public bool Await < T > ( int id, T value )
+    {
+        return false;
+    }
+}
+
 // NOTE: Schedule is also used for change tracking
-public interface IExpressionStateMachine : IDisposable
+// NOTE: Await is also used for validation
+public interface IExpressionStateMachine : IExpressionStateMachineHandler
 {
     event EventHandler? StateChanged;
 
     ExpressionState State { get; }
 
     void MoveNext ( );
-    void Cancel   ( ); // TODO: Rename?
+    void Reset    ( );
 
     bool Get < T > ( int id, [ MaybeNullWhen ( true ) ] out T? value );
     T?   Set < T > ( int id, T? value );
     void Clear     ( int id );
 
-    bool Schedule < T > ( int id, T instance, MemberInfo member );
-    bool Await    < T > ( int id, T value );
-
     bool            TryGetException ( [ NotNullWhen ( true ) ] out ExceptionDispatchInfo? exception );
     ExpressionState SetException    ( ExceptionDispatchInfo exception );
+
+    void SetHandler ( IExpressionStateMachineHandler handler );
 }
 
 public interface IExpressionStateMachine < TResult > : IExpressionStateMachine
@@ -76,9 +127,9 @@ public sealed class ExpressionStateMachineStore < TResult > : IExpressionStateMa
     }
 
     public void MoveNext ( ) => stateMachine.MoveNext ( );
-    public void Cancel   ( )
+    public void Reset   ( )
     {
-        stateMachine.Cancel ( );
+        stateMachine.Reset ( );
 
         Clear ( );
     }
@@ -121,7 +172,7 @@ public sealed class ExpressionStateMachineStore < TResult > : IExpressionStateMa
     public ExpressionState SetException ( ExceptionDispatchInfo exception ) => stateMachine.SetException ( exception );
     public bool TryGetResult ( [ MaybeNullWhen ( true ) ] out TResult? value ) => stateMachine.TryGetResult ( out value );
     public ExpressionState SetResult ( TResult? value ) => stateMachine.SetResult ( value );
-    public void Dispose ( ) => stateMachine.Dispose ( );
+    public void SetHandler ( IExpressionStateMachineHandler handler ) => stateMachine.SetHandler(handler);
 }
 
 // TODO: Replace state with typed state visitor
@@ -149,9 +200,9 @@ public struct ExpressionStateMachineStore < T0, TResult > : IExpressionStateMach
     }
 
     public void MoveNext ( ) => stateMachine.MoveNext ( );
-    public void Cancel   ( )
+    public void Reset    ( )
     {
-        stateMachine.Cancel ( );
+        stateMachine.Reset ( );
 
         Clear ( );
     }
@@ -193,7 +244,7 @@ public struct ExpressionStateMachineStore < T0, TResult > : IExpressionStateMach
     public ExpressionState SetException ( ExceptionDispatchInfo exception ) => stateMachine.SetException ( exception );
     public bool TryGetResult ( [ MaybeNullWhen ( true ) ] out TResult? value ) => stateMachine.TryGetResult ( out value );
     public ExpressionState SetResult ( TResult? value ) => stateMachine.SetResult ( value );
-    public void Dispose ( ) => stateMachine.Dispose ( );
+    public void SetHandler ( IExpressionStateMachineHandler handler ) => stateMachine.SetHandler(handler);
 }
 
 public sealed class ExpressionStateMachine < TStateMachineStore, TResult > : IExpressionStateMachine < TResult >
@@ -201,13 +252,13 @@ public sealed class ExpressionStateMachine < TStateMachineStore, TResult > : IEx
 {
     private readonly TStateMachineStore  store;
     private readonly Func < TStateMachineStore, ExpressionState > moveNext;
-    private readonly CompositeDisposable disposables;
+    private          IExpressionStateMachineHandler handler;
 
     public ExpressionStateMachine ( TStateMachineStore store, Func < TStateMachineStore, ExpressionState > moveNext )
     {
         this.store = store;
-        this.disposables = new ( );
         this.moveNext = moveNext;
+        this.handler = ExpressionStateMachineHandler.Default;
 
         store.SetStateMachine ( this );
     }
@@ -222,6 +273,9 @@ public sealed class ExpressionStateMachine < TStateMachineStore, TResult > : IEx
     {
         State = moveNext ( store );
 
+        // TODO: If State == Await, check for marked exception or result immediately
+        //       It could have ran synchronously
+
         if ( State != ExpressionState.Exception )
             Exception = null;
 
@@ -231,39 +285,38 @@ public sealed class ExpressionStateMachine < TStateMachineStore, TResult > : IEx
         StateChanged?.Invoke ( this, EventArgs.Empty );
     }
 
-    public void Cancel ( )
+    public void Reset ( )
     {
-        disposables.Clear ( );
-
         State     = ExpressionState.Uninitialized;
         Exception = null;
         Result    = default;
+
+        StateChanged?.Invoke ( this, EventArgs.Empty );
     }
 
     public bool Get<T> ( int id, [MaybeNullWhen ( true )] out T? value ) => store.Get ( id, out value );
     public T? Set<T> ( int id, T? value ) => store.Set ( id, value );
     public void Clear ( int id ) => store.Clear ( id );
 
-    public bool Await<T> ( int id, T value )
+    bool isRunningAwait;
+
+    public bool Await < T > ( int id, T value )
     {
-        if ( value is IAwaitable )
+        try
         {
-            // TODO: Handle awaitable
+            isRunningAwait = true;
 
-            // TODO: Callback: Clear ( id ), MoveNext
+            return handler.Await ( id, value );
         }
-
-        return false;
+        finally
+        {
+            isRunningAwait = false;
+        }
     }
 
     public bool Schedule < T > ( int id, T instance, MemberInfo member )
     {
-        var scheduler = (IScheduler?) null;
-        var sub       = (ChangeTracking.IMemberSubscription?) null;
-
-        // TODO: Callback: Clear ( id ), MoveNext
-
-        return false;
+        return handler.Schedule ( id, instance, member );
     }
 
     public bool TryGetException ( [ NotNullWhen ( true ) ] out ExceptionDispatchInfo? exception )
@@ -280,6 +333,7 @@ public sealed class ExpressionStateMachine < TStateMachineStore, TResult > : IEx
 
     public ExpressionState SetException ( ExceptionDispatchInfo exception )
     {
+        // TODO: Mark exceptions while isRunningAwait is true
         Exception = exception;
 
         return ExpressionState.Exception;
@@ -299,13 +353,14 @@ public sealed class ExpressionStateMachine < TStateMachineStore, TResult > : IEx
 
     public ExpressionState SetResult ( TResult? value )
     {
+        // TODO: Mark results while isRunningAwait is true
         Result = value;
 
         return ExpressionState.Result;
     }
 
-    public void Dispose ( )
+    public void SetHandler ( IExpressionStateMachineHandler handler )
     {
-        disposables.Dispose ( );
+        this.handler = handler;
     }
 }

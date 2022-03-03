@@ -82,6 +82,10 @@ public class ExpressionStateMachineBuilderVisitor : ExpressionVisitor
         if ( node.NodeType == ExpressionType.Quote )
             return node;
 
+        // TODO: Convert throws to SetException
+        if ( node.NodeType == ExpressionType.Throw )
+            return node;
+
         return Visit ( node.Operand );
     }
 

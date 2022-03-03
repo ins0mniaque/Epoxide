@@ -26,24 +26,26 @@ public class BindingExceptionHandler : IExceptionHandler
 
     public void Catch ( ExceptionDispatchInfo exception )
     {
-        if ( exception.SourceException is BindingException bindingException )
-            bindingException.Binding = Binding;
+        if ( exception.SourceException is StateMachineException stateMachineException )
+            stateMachineException.Source = Binding;
 
         UnhandledExceptionHandler.Catch ( exception );
     }
 }
 
+// TODO: Rename exception
+
 /// <summary>
-/// An exception that is thrown when an error is encountered while binding.
+/// An exception that is thrown when an error is encountered while running the state machine.
 /// </summary>
 [ Serializable ]
-public sealed class BindingException : Exception
+public sealed class StateMachineException : Exception
 {
     public static ExceptionDispatchInfo Capture ( Exception exception )
     {
         exception = Unwrap ( exception );
 
-        return ExceptionDispatchInfo.Capture ( new BindingException ( exception.Message, exception ) );
+        return ExceptionDispatchInfo.Capture ( new StateMachineException ( exception.Message, exception ) );
     }
 
     private static Exception Unwrap ( Exception exception )
@@ -58,59 +60,41 @@ public sealed class BindingException : Exception
     }
 
     [ NonSerialized ]
-    private IBinding? binding;
+    private object? source;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="BindingException" /> class.
+    /// Initializes a new instance of the <see cref="StateMachineException" /> class.
     /// </summary>
-    public BindingException ( ) { }
+    public StateMachineException ( ) { }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="BindingException" /> class.
-    /// </summary>
-    /// <param name="message">The error message that explains the reason for the exception.</param>
-    public BindingException ( string message ) : base ( message ) { }
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="BindingException" /> class.
+    /// Initializes a new instance of the <see cref="StateMachineException" /> class.
     /// </summary>
     /// <param name="message">The error message that explains the reason for the exception.</param>
-    /// <param name="innerException">The exception that is the cause of the current exception.</param>
-    public BindingException ( string message, Exception? innerException ) : base ( message, innerException ) { }
+    public StateMachineException ( string message ) : base ( message ) { }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="BindingException" /> class.
-    /// </summary>
-    /// <param name="message">The error message that explains the reason for the exception.</param>
-    /// <param name="binding">The binding that was involved in the error.</param>
-    public BindingException ( string message, IBinding binding ) : this ( message, null, binding ) { }
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="BindingException" /> class.
+    /// Initializes a new instance of the <see cref="StateMachineException" /> class.
     /// </summary>
     /// <param name="message">The error message that explains the reason for the exception.</param>
     /// <param name="innerException">The exception that is the cause of the current exception.</param>
-    /// <param name="binding">The binding that was involved in the error.</param>
-    public BindingException ( string message, Exception? innerException, IBinding binding ) : base ( message, innerException )
-    {
-        Binding = binding;
-    }
+    public StateMachineException ( string message, Exception? innerException ) : base ( message, innerException ) { }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="BindingException" /> class from a serialized form.
+    /// Initializes a new instance of the <see cref="StateMachineException" /> class from a serialized form.
     /// </summary>
     /// <param name="info">The serialization info.</param>
     /// <param name="context">The streaming context being used.</param>
-    public BindingException ( SerializationInfo info, StreamingContext context ) : base ( info, context ) { }
+    public StateMachineException ( SerializationInfo info, StreamingContext context ) : base ( info, context ) { }
 
     /// <summary>
-    /// Gets or sets the binding that was involved in the error.
+    /// Gets or sets the source that was involved in the error.
     /// </summary>
-    public IBinding? Binding
+    public object? Source
     {
-        get => binding;
-        set => binding = value;
+        get => source;
+        set => source = value;
     }
 
-    public override string Message => $"Binding error: { base.Message }\nSource: { DebugView.Display ( Binding ) }";
+    public override string Message => $"Error: { base.Message }\nSource: { DebugView.Display ( Source ) }";
 }

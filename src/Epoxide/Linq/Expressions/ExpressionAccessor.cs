@@ -190,19 +190,19 @@ public class ExpressionAccessor < TSource > : IExpressionAccessor < TSource >
     protected object? TryReadValue ( TSource source, out ExceptionDispatchInfo? exception )
     {
         try                   { exception = null; return ReadValue ( source ); }
-        catch ( Exception e ) { exception = BindingException.Capture ( e ); return null; }
+        catch ( Exception e ) { exception = StateMachineException.Capture ( e ); return null; }
     }
 
     protected object? TryReadTarget ( TSource source, out ExceptionDispatchInfo? exception )
     {
         try                   { exception = null; return ReadTarget ( source ); }
-        catch ( Exception e ) { exception = BindingException.Capture ( e ); return null; }
+        catch ( Exception e ) { exception = StateMachineException.Capture ( e ); return null; }
     }
 
     protected void TryWrite ( object target, object? value, out ExceptionDispatchInfo? exception )
     {
         try                   { exception = null; WriteTarget ( target, value ); }
-        catch ( Exception e ) { exception = BindingException.Capture ( e ); }
+        catch ( Exception e ) { exception = StateMachineException.Capture ( e ); }
     }
 
     protected static SerialDisposable Disconnected ( SerialDisposable token )
